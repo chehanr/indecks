@@ -1,0 +1,24 @@
+{
+  "name": "@indecks/auth",
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {},
+  "dependencies": {
+    "@indecks/db": "workspace:*",
+    "@indecks/env": "workspace:*",
+    "better-auth": "catalog:",
+    "dotenv": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@indecks/config": "workspace:*",
+    "typescript": "^5"
+  }
+}
