@@ -13,9 +13,7 @@
   "dependencies": {
     "@indecks/db": "workspace:*",
     "@indecks/env": "workspace:*",
-    "better-auth": "catalog:",
-    "dotenv": "catalog:",
-    "zod": "catalog:"
+    "better-auth": "catalog:"
   },
   "devDependencies": {
     "@indecks/config": "workspace:*",

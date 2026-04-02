@@ -13,12 +13,9 @@
   "dependencies": {
     "@indecks/auth": "workspace:*",
     "@indecks/db": "workspace:*",
-    "@indecks/env": "workspace:*",
     "@indecks/pipeline": "workspace:*",
     "@indecks/vector": "workspace:*",
-    "@trpc/client": "catalog:",
     "@trpc/server": "catalog:",
-    "dotenv": "catalog:",
     "drizzle-orm": "^0.45.1",
     "nanoid": "^5.1.5",
     "zod": "catalog:"

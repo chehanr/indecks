@@ -29,12 +29,7 @@
         "@indecks/env": "workspace:*",
         "@indecks/pipeline": "workspace:*",
         "@indecks/vector": "workspace:*",
-        "@trpc/server": "catalog:",
-        "better-auth": "catalog:",
-        "dotenv": "catalog:",
-        "drizzle-orm": "^0.45.2",
         "hono": "catalog:",
-        "zod": "catalog:",
       },
       "devDependencies": {
         "@indecks/config": "workspace:*",
@@ -47,22 +42,16 @@
       "name": "web",
       "version": "0.0.0",
       "dependencies": {
-        "@hookform/resolvers": "^5.1.1",
         "@indecks/api": "workspace:*",
-        "@indecks/auth": "workspace:*",
         "@indecks/env": "workspace:*",
         "@indecks/ui": "workspace:*",
-        "@libsql/client": "catalog:",
         "@tailwindcss/vite": "^4.1.18",
         "@tanstack/react-form": "^1.28.0",
         "@tanstack/react-query": "^5.90.12",
         "@tanstack/react-router": "^1.141.1",
         "@trpc/client": "catalog:",
-        "@trpc/server": "catalog:",
         "@trpc/tanstack-react-query": "^11.13.4",
         "better-auth": "catalog:",
-        "dotenv": "catalog:",
-        "libsql": "catalog:",
         "lucide-react": "catalog:",
         "next-themes": "catalog:",
         "react": "catalog:",
@@ -90,12 +79,9 @@
       "dependencies": {
         "@indecks/auth": "workspace:*",
         "@indecks/db": "workspace:*",
-        "@indecks/env": "workspace:*",
         "@indecks/pipeline": "workspace:*",
         "@indecks/vector": "workspace:*",
-        "@trpc/client": "catalog:",
         "@trpc/server": "catalog:",
-        "dotenv": "catalog:",
         "drizzle-orm": "^0.45.1",
         "nanoid": "^5.1.5",
         "zod": "catalog:",
@@ -112,8 +98,6 @@
         "@indecks/db": "workspace:*",
         "@indecks/env": "workspace:*",
         "better-auth": "catalog:",
-        "dotenv": "catalog:",
-        "zod": "catalog:",
       },
       "devDependencies": {
         "@indecks/config": "workspace:*",
@@ -129,13 +113,11 @@
       "dependencies": {
         "@indecks/env": "workspace:*",
         "@libsql/client": "catalog:",
-        "dotenv": "catalog:",
         "drizzle-orm": "^0.45.1",
-        "libsql": "catalog:",
-        "zod": "catalog:",
       },
       "devDependencies": {
         "@indecks/config": "workspace:*",
+        "dotenv": "catalog:",
         "drizzle-kit": "^0.31.8",
         "typescript": "^5",
       },
@@ -158,7 +140,6 @@
       "name": "@indecks/pipeline",
       "dependencies": {
         "@indecks/db": "workspace:*",
-        "@indecks/env": "workspace:*",
         "@indecks/vector": "workspace:*",
         "drizzle-orm": "^0.45.2",
         "nanoid": "^5.1.5",
@@ -413,8 +394,6 @@
 
     "@hono/trpc-server": ["@hono/trpc-server@0.4.2", "", { "peerDependencies": { "@trpc/server": "^10.10.0 || >11.0.0-rc", "hono": ">=4.0.0" } }, "sha512-3TDrc42CZLgcTFkXQba+y7JlRWRiyw1AqhLqztWyNS2IFT+3bHld0lxKdGBttCtGKHYx0505dM67RMazjhdZqw=="],
 
-    "@hookform/resolvers": ["@hookform/resolvers@5.2.2", "", { "dependencies": { "@standard-schema/utils": "^0.3.0" }, "peerDependencies": { "react-hook-form": "^7.55.0" } }, "sha512-A/IxlMLShx3KjV/HeTcTfaMxdwy690+L/ZADoeaTltLx+CVuzkeVIPuybK3jrRfw7YZnmdKsVVHAlEPIAEUNlA=="],
-
     "@indecks/api": ["@indecks/api@workspace:packages/api"],
 
     "@indecks/auth": ["@indecks/auth@workspace:packages/auth"],
@@ -600,8 +579,6 @@
     "@sindresorhus/merge-streams": ["@sindresorhus/merge-streams@4.0.0", "", {}, "sha512-tlqY9xq5ukxTUZBmoOp+m61cqwQD5pHJtFY3Mn8CA8ps6yghLH/Hw8UPdqg4OLmFW3IFlcXnQNmo/dh8HzXYIQ=="],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
-
-    "@standard-schema/utils": ["@standard-schema/utils@0.3.0", "", {}, "sha512-e7Mew686owMaPJVNNLs55PUvgz371nKgwsc4vxE49zsODpJEnxgxRo2y/OKrqueavXgZNMDVj3DdHFlaSAeU8g=="],
 
     "@t3-oss/env-core": ["@t3-oss/env-core@0.13.11", "", { "peerDependencies": { "arktype": "^2.1.0", "typescript": ">=5.0.0", "valibot": "^1.0.0-beta.7 || ^1.0.0", "zod": "^3.24.0 || ^4.0.0" }, "optionalPeers": ["arktype", "typescript", "valibot", "zod"] }, "sha512-sM7GYY+KL7H/Hl0BE0inWfk3nRHZOLhmVn7sHGxaZt9FAR6KqREXAE+6TqKfiavfXmpRxO/OZ2QgKRd+oiBYRQ=="],
 
@@ -1318,8 +1295,6 @@
     "react": ["react@19.2.4", "", {}, "sha512-9nfp2hYpCwOjAN+8TZFGhtWEwgvWHXqESH8qT89AT/lWklpLON22Lc8pEtnpsZz7VmawabSU0gCjnj8aC0euHQ=="],
 
     "react-dom": ["react-dom@19.2.4", "", { "dependencies": { "scheduler": "^0.27.0" }, "peerDependencies": { "react": "^19.2.4" } }, "sha512-AXJdLo8kgMbimY95O2aKQqsz2iWi9jMgKJhRBAxECE4IFxfcazB2LmzloIoibJI3C12IlY20+KFaLv+71bUJeQ=="],
-
-    "react-hook-form": ["react-hook-form@7.72.0", "", { "peerDependencies": { "react": "^16.8.0 || ^17 || ^18 || ^19" } }, "sha512-V4v6jubaf6JAurEaVnT9aUPKFbNtDgohj5CIgVGyPHvT9wRx5OZHVjz31GsxnPNI278XMu+ruFz+wGOscHaLKw=="],
 
     "react-refresh": ["react-refresh@0.17.0", "", {}, "sha512-z6F7K9bV85EfseRCp2bzrpyQ0Gkw1uLoCel9XBVWPg/TjRj94SkJzUTGfOa4bs7iJvBWtQG0Wq7wnI0syw3EBQ=="],
 

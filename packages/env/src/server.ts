@@ -12,9 +12,6 @@ export const env = createEnv({
 		NODE_ENV: z
 			.enum(["development", "production", "test"])
 			.default("development"),
-		EMBEDDING_API_BASE_URL: z.string().optional(),
-		EMBEDDING_API_KEY: z.string().optional(),
-		EMBEDDING_MODEL: z.string().optional(),
 	},
 	runtimeEnv: process.env,
 	emptyStringAsUndefined: true,

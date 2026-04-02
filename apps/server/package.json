@@ -17,12 +17,7 @@
     "@indecks/env": "workspace:*",
     "@indecks/pipeline": "workspace:*",
     "@indecks/vector": "workspace:*",
-    "@trpc/server": "catalog:",
-    "better-auth": "catalog:",
-    "dotenv": "catalog:",
-    "drizzle-orm": "^0.45.2",
-    "hono": "catalog:",
-    "zod": "catalog:"
+    "hono": "catalog:"
   },
   "devDependencies": {
     "@indecks/config": "workspace:*",
