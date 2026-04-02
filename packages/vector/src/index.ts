@@ -1,27 +1,33 @@
 import { Database } from "bun:sqlite";
+import { getLoadablePath } from "sqlite-vec";
+
+const SQLITE_LIB_PATHS = [
+	"/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib",
+	"/usr/local/opt/sqlite3/lib/libsqlite3.dylib",
+	"/usr/lib/x86_64-linux-gnu/libsqlite3.so",
+	"/usr/lib/libsqlite3.so",
+];
+
+function loadCustomSQLite(): void {
+	for (const p of SQLITE_LIB_PATHS) {
+		try {
+			Database.setCustomSQLite(p);
+			return;
+		} catch {
+			// try next path
+		}
+	}
+	throw new Error(
+		"Could not find a system SQLite with extension support. Install sqlite via brew or apt."
+	);
+}
 
 interface VectorSearchResult {
 	chunkId: string;
 	distance: number;
 }
 
-function cosineSimilarity(a: Float32Array, b: Float32Array): number {
-	let dot = 0;
-	let normA = 0;
-	let normB = 0;
-	for (let i = 0; i < a.length; i++) {
-		const ai = a[i] ?? 0;
-		const bi = b[i] ?? 0;
-		dot += ai * bi;
-		normA += ai * ai;
-		normB += bi * bi;
-	}
-	const denom = Math.sqrt(normA) * Math.sqrt(normB);
-	if (denom === 0) {
-		return 0;
-	}
-	return dot / denom;
-}
+loadCustomSQLite();
 
 export class VectorDb {
 	private readonly db: Database;
@@ -30,37 +36,33 @@ export class VectorDb {
 	constructor(dbPath: string, dimensions = 768) {
 		this.dimensions = dimensions;
 		this.db = new Database(dbPath);
+		this.db.loadExtension(getLoadablePath());
 		this.db.exec("PRAGMA journal_mode=WAL");
 		this.db.exec(
-			`CREATE TABLE IF NOT EXISTS vec_chunks (
+			`CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
 				chunk_id TEXT PRIMARY KEY,
-				embedding BLOB NOT NULL
+				embedding FLOAT[${dimensions}] distance_metric=cosine
 			)`
 		);
 	}
 
 	upsert(chunkId: string, embedding: Float32Array): void {
-		const stmt = this.db.prepare(
-			"INSERT OR REPLACE INTO vec_chunks(chunk_id, embedding) VALUES ($chunkId, $embedding)"
-		);
-		stmt.run({
-			$chunkId: chunkId,
-			$embedding: new Uint8Array(embedding.buffer),
-		});
+		this.db
+			.prepare(
+				"INSERT OR REPLACE INTO vec_chunks(chunk_id, embedding) VALUES (?, vec_f32(?))"
+			)
+			.run(chunkId, embedding);
 	}
 
 	upsertBatch(
 		items: Array<{ chunkId: string; embedding: Float32Array }>
 	): void {
 		const stmt = this.db.prepare(
-			"INSERT OR REPLACE INTO vec_chunks(chunk_id, embedding) VALUES ($chunkId, $embedding)"
+			"INSERT OR REPLACE INTO vec_chunks(chunk_id, embedding) VALUES (?, vec_f32(?))"
 		);
 		const tx = this.db.transaction(() => {
 			for (const item of items) {
-				stmt.run({
-					$chunkId: item.chunkId,
-					$embedding: new Uint8Array(item.embedding.buffer),
-				});
+				stmt.run(item.chunkId, item.embedding);
 			}
 		});
 		tx();
@@ -68,21 +70,19 @@ export class VectorDb {
 
 	search(query: Float32Array, limit = 10): VectorSearchResult[] {
 		const rows = this.db
-			.prepare("SELECT chunk_id, embedding FROM vec_chunks")
-			.all() as Array<{ chunk_id: string; embedding: Uint8Array }>;
+			.prepare(
+				`SELECT chunk_id, distance
+				FROM vec_chunks
+				WHERE embedding MATCH ?
+				ORDER BY distance
+				LIMIT ?`
+			)
+			.all(query, limit) as Array<{ chunk_id: string; distance: number }>;
 
-		const scored = rows.map((row) => {
-			const stored = new Float32Array(
-				row.embedding.buffer,
-				row.embedding.byteOffset,
-				row.embedding.byteLength / 4
-			);
-			const similarity = cosineSimilarity(query, stored);
-			return { chunkId: row.chunk_id, distance: 1 - similarity };
-		});
-
-		scored.sort((a, b) => a.distance - b.distance);
-		return scored.slice(0, limit);
+		return rows.map((row) => ({
+			chunkId: row.chunk_id,
+			distance: row.distance,
+		}));
 	}
 
 	removeByChunkIds(ids: string[]): void {
