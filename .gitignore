@@ -14,7 +14,7 @@ build
 
 # IDEs and editors
 .vscode/*
-!.vscode/settings.json
+!.vscode/settings.example.json
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
@@ -23,6 +23,7 @@ build
 *.swo
 *~
 .DS_Store
+.claude/settings.local.json
 
 # Logs
 logs
