@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { stat } from "node:fs/promises";
+import { stat, unlink } from "node:fs/promises";
 
 import type { createDb } from "@indecks/db";
 import { chunk as chunkTable } from "@indecks/db/schema/chunk";
@@ -10,11 +10,11 @@ import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 
 import type { EmbedConfig } from "./embedder";
-import { embedFrames } from "./embedder";
+import { embedVideo } from "./embedder";
 import {
 	chunkVideo,
 	cleanupChunks,
-	extractFrames,
+	downscaleChunk,
 	getVideoDuration,
 	isStillFrame,
 	scanDirectory,
@@ -150,18 +150,13 @@ export async function processVideo(
 				continue;
 			}
 
-			const frames = await extractFrames(chunkInfo.chunkPath);
-			if (frames.length === 0) {
-				await db
-					.update(chunkTable)
-					.set({ embeddingStatus: "error" })
-					.where(eq(chunkTable.id, chunkId));
-				processed++;
-				continue;
-			}
-
+			let downscaledPath: string | null = null;
 			try {
-				const embedding = await embedFrames(frames, embedConfig);
+				downscaledPath = await downscaleChunk(chunkInfo.chunkPath);
+				const videoFile = Bun.file(downscaledPath);
+				const videoBuffer = Buffer.from(await videoFile.arrayBuffer());
+
+				const embedding = await embedVideo(videoBuffer, embedConfig);
 				vectorDb.upsert(chunkId, new Float32Array(embedding));
 
 				await db
@@ -174,6 +169,12 @@ export async function processVideo(
 					.set({ embeddingStatus: "error" })
 					.where(eq(chunkTable.id, chunkId));
 				throw err;
+			} finally {
+				if (downscaledPath) {
+					await unlink(downscaledPath).catch(() => {
+						/* cleanup */
+					});
+				}
 			}
 
 			processed++;

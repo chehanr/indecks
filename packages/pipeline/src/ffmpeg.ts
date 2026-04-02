@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const SUPPORTED_EXTENSIONS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm"]);
+const MP4_EXT = /\.mp4$/;
 
 interface ChunkInfo {
 	chunkPath: string;
@@ -16,8 +17,9 @@ interface ChunkOptions {
 	overlap?: number;
 }
 
-interface FrameOptions {
-	count?: number;
+interface DownscaleOptions {
+	fps?: number;
+	height?: number;
 }
 
 async function run(
@@ -133,53 +135,32 @@ export async function chunkVideo(
 	return chunks;
 }
 
-export async function extractFrames(
+export async function downscaleChunk(
 	chunkPath: string,
-	options: FrameOptions = {}
-): Promise<Buffer[]> {
-	const { count = 6 } = options;
-	const tmpDir = join(tmpdir(), `indecks_frames_${Date.now()}`);
-	await Bun.write(join(tmpDir, ".keep"), "");
+	options: DownscaleOptions = {}
+): Promise<string> {
+	const { height = 480, fps = 5 } = options;
+	const outPath = chunkPath.replace(MP4_EXT, "_ds.mp4");
 
-	const duration = await getVideoDuration(chunkPath);
-	const interval = duration / (count + 1);
-	const frames: Buffer[] = [];
+	const { exitCode, stderr } = await run("ffmpeg", [
+		"-y",
+		"-i",
+		chunkPath,
+		"-vf",
+		`scale=-2:${height},fps=${fps}`,
+		"-c:v",
+		"libx264",
+		"-preset",
+		"ultrafast",
+		"-an",
+		outPath,
+	]);
 
-	for (let i = 1; i <= count; i++) {
-		const timestamp = interval * i;
-		const outPath = join(tmpDir, `frame_${String(i).padStart(3, "0")}.jpg`);
-
-		await run("ffmpeg", [
-			"-y",
-			"-ss",
-			String(timestamp),
-			"-i",
-			chunkPath,
-			"-frames:v",
-			"1",
-			"-q:v",
-			"2",
-			outPath,
-		]);
-
-		const file = Bun.file(outPath);
-		if (await file.exists()) {
-			const buf = Buffer.from(await file.arrayBuffer());
-			frames.push(buf);
-		}
+	if (exitCode !== 0) {
+		throw new Error(`ffmpeg downscale failed: ${stderr}`);
 	}
 
-	for (let i = 1; i <= count; i++) {
-		const outPath = join(tmpDir, `frame_${String(i).padStart(3, "0")}.jpg`);
-		await unlink(outPath).catch(() => {
-			/* cleanup */
-		});
-	}
-	await unlink(join(tmpDir, ".keep")).catch(() => {
-		/* cleanup */
-	});
-
-	return frames;
+	return outPath;
 }
 
 export async function isStillFrame(
@@ -273,4 +254,4 @@ export async function cleanupChunks(chunks: ChunkInfo[]): Promise<void> {
 	}
 }
 
-export type { ChunkInfo, ChunkOptions, FrameOptions };
+export type { ChunkInfo, ChunkOptions, DownscaleOptions };

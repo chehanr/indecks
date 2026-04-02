@@ -19,86 +19,53 @@ interface EmbeddingResponse {
 	};
 }
 
-function averageAndNormalize(embeddings: number[][]): number[] {
-	const dim = embeddings[0]?.length ?? 0;
-	const count = embeddings.length;
-	const avg = new Array<number>(dim).fill(0);
-
-	for (const emb of embeddings) {
-		emb.forEach((val, i) => {
-			avg[i] = (avg[i] ?? 0) + val;
-		});
-	}
-
-	const scaled = avg.map((v) => v / count);
-	const norm = Math.sqrt(scaled.reduce((sum, v) => sum + v * v, 0));
-	if (norm === 0) {
-		return scaled;
-	}
-	return scaled.map((v) => v / norm);
-}
-
-export async function embedFrames(
-	frames: Buffer[],
+export async function embedVideo(
+	videoBuffer: Buffer,
 	config: EmbedConfig
 ): Promise<number[]> {
 	const url = `${config.baseUrl.replace(TRAILING_SLASH, "")}/v1/embeddings`;
+	const base64 = videoBuffer.toString("base64");
 
-	const embeddings: number[][] = [];
-
-	for (const frame of frames) {
-		const base64 = frame.toString("base64");
-		const response = await fetch(url, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
-				Authorization: `Bearer ${config.apiKey}`,
-			},
-			body: JSON.stringify({
-				model: config.model,
-				messages: [
-					{
-						role: "system",
-						content: [{ type: "text", text: "Represent the visual content." }],
-					},
-					{
-						role: "user",
-						content: [
-							{
-								type: "image_url",
-								image_url: {
-									url: `data:image/jpeg;base64,${base64}`,
-								},
+	const response = await fetch(url, {
+		method: "POST",
+		headers: {
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${config.apiKey}`,
+		},
+		body: JSON.stringify({
+			model: config.model,
+			messages: [
+				{
+					role: "system",
+					content: [{ type: "text", text: "Represent the visual content." }],
+				},
+				{
+					role: "user",
+					content: [
+						{
+							type: "video_url",
+							video_url: {
+								url: `data:video/mp4;base64,${base64}`,
 							},
-						],
-					},
-				],
-				encoding_format: "float",
-			}),
-		});
+						},
+					],
+				},
+			],
+			encoding_format: "float",
+		}),
+	});
 
-		if (!response.ok) {
-			const body = await response.text();
-			throw new Error(`Embedding API error (${response.status}): ${body}`);
-		}
-
-		const result = (await response.json()) as EmbeddingResponse;
-		const [first] = result.data;
-		if (!first) {
-			throw new Error("Embedding API returned no data");
-		}
-		embeddings.push(first.embedding);
+	if (!response.ok) {
+		const body = await response.text();
+		throw new Error(`Embedding API error (${response.status}): ${body}`);
 	}
 
-	if (embeddings.length === 0) {
-		throw new Error("No frames to embed");
+	const result = (await response.json()) as EmbeddingResponse;
+	const [first] = result.data;
+	if (!first) {
+		throw new Error("Embedding API returned no data");
 	}
-
-	if (embeddings.length === 1) {
-		return embeddings[0] as number[];
-	}
-
-	return averageAndNormalize(embeddings);
+	return first.embedding;
 }
 
 export async function embedText(

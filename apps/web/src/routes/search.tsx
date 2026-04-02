@@ -57,6 +57,7 @@ function VideoPlayer({
 		<video
 			className="w-full rounded-md"
 			controls
+			muted
 			preload="metadata"
 			ref={videoRef}
 			src={src}
@@ -136,6 +137,7 @@ function SearchPage() {
 						<div className="flex flex-col gap-2">
 							<Label htmlFor="query">Search Query</Label>
 							<Input
+								autoComplete="off"
 								id="query"
 								onChange={(e) => setQuery(e.target.value)}
 								placeholder="Describe what you're looking for..."
