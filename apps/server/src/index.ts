@@ -1,11 +1,28 @@
+import { stat } from "node:fs/promises";
+import { resolve } from "node:path";
+
 import { trpcServer } from "@hono/trpc-server";
 import { createContext } from "@indecks/api/context";
 import { appRouter } from "@indecks/api/routers/index";
 import { auth } from "@indecks/auth";
+import { db } from "@indecks/db";
+import { library as libraryTable } from "@indecks/db/schema/library";
 import { env } from "@indecks/env/server";
+import { recoverStaleJobs, startWorker } from "@indecks/pipeline/queue";
+import { VectorDb } from "@indecks/vector";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+
+const RANGE_PATTERN = /bytes=(\d+)-(\d*)/;
+
+const vectorDb = new VectorDb(
+	resolve(env.VECTOR_DB_PATH),
+	env.EMBEDDING_DIMENSIONS
+);
+
+await recoverStaleJobs(db);
+startWorker(db, vectorDb);
 
 const app = new Hono();
 
@@ -15,8 +32,9 @@ app.use(
 	cors({
 		origin: env.CORS_ORIGIN,
 		allowMethods: ["GET", "POST", "OPTIONS"],
-		allowHeaders: ["Content-Type", "Authorization"],
+		allowHeaders: ["Content-Type", "Authorization", "Range"],
 		credentials: true,
+		exposeHeaders: ["Content-Range", "Accept-Ranges", "Content-Length"],
 	})
 );
 
@@ -27,10 +45,66 @@ app.use(
 	trpcServer({
 		router: appRouter,
 		createContext: (_opts, context) => {
-			return createContext({ context });
+			return createContext({ context, db, vectorDb });
 		},
 	})
 );
+
+app.get("/api/video", async (c) => {
+	const filePath = c.req.query("path");
+	if (!filePath) {
+		return c.text("Missing path parameter", 400);
+	}
+
+	const absPath = resolve(filePath);
+
+	const libraries = await db.select().from(libraryTable).all();
+	const isAllowed = libraries.some((lib) =>
+		absPath.startsWith(resolve(lib.folderPath))
+	);
+	if (!isAllowed) {
+		return c.text("Access denied", 403);
+	}
+
+	const fileStat = await stat(absPath).catch(() => null);
+	if (!fileStat) {
+		return c.text("File not found", 404);
+	}
+
+	const fileSize = fileStat.size;
+	const range = c.req.header("Range");
+
+	if (range) {
+		const match = range.match(RANGE_PATTERN);
+		if (match) {
+			const start = Number.parseInt(match[1] ?? "0", 10);
+			const end = match[2] ? Number.parseInt(match[2], 10) : fileSize - 1;
+			const chunkSize = end - start + 1;
+
+			const file = Bun.file(absPath);
+			const slice = file.slice(start, end + 1);
+
+			return new Response(slice.stream(), {
+				status: 206,
+				headers: {
+					"Content-Range": `bytes ${start}-${end}/${fileSize}`,
+					"Accept-Ranges": "bytes",
+					"Content-Length": String(chunkSize),
+					"Content-Type": "video/mp4",
+				},
+			});
+		}
+	}
+
+	const file = Bun.file(absPath);
+	return new Response(file.stream(), {
+		headers: {
+			"Accept-Ranges": "bytes",
+			"Content-Length": String(fileSize),
+			"Content-Type": "video/mp4",
+		},
+	});
+});
 
 app.get("/", (c) => {
 	return c.text("OK");

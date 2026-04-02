@@ -45,6 +45,14 @@ lerna-debug.log*
 coverage
 .nyc_output
 
+# Database
+*.db
+*.db-wal
+*.db-shm
+
+# Test videos
+test-vids
+
 # Misc
 *.tgz
 .cache

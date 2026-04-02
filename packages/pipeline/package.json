@@ -1,0 +1,21 @@
+{
+  "name": "@indecks/pipeline",
+  "type": "module",
+  "exports": {
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "dependencies": {
+    "@indecks/db": "workspace:*",
+    "@indecks/env": "workspace:*",
+    "@indecks/vector": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "nanoid": "^5.1.5"
+  },
+  "devDependencies": {
+    "@indecks/config": "workspace:*",
+    "@types/bun": "catalog:",
+    "typescript": "^5"
+  }
+}

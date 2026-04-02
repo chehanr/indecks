@@ -11,6 +11,11 @@ import {
 	userRelations,
 	verification,
 } from "./schema/auth";
+import { chunk, chunkRelations } from "./schema/chunk";
+import { job } from "./schema/job";
+import { library, libraryRelations } from "./schema/library";
+import { settings } from "./schema/settings";
+import { video, videoRelations } from "./schema/video";
 
 export function createDb() {
 	const client = createClient({
@@ -27,6 +32,14 @@ export function createDb() {
 			user,
 			userRelations,
 			verification,
+			library,
+			libraryRelations,
+			video,
+			videoRelations,
+			chunk,
+			chunkRelations,
+			job,
+			settings,
 		},
 	});
 }
