@@ -17,6 +17,7 @@
     "@indecks/vector": "workspace:*",
     "@trpc/server": "catalog:",
     "drizzle-orm": "^0.45.1",
+    "effect": "catalog:",
     "nanoid": "^5.1.5",
     "zod": "catalog:"
   },

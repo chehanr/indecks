@@ -1,4 +1,4 @@
-import { createDb } from "@indecks/db";
+import { DbService } from "@indecks/db";
 import {
 	account,
 	accountRelations,
@@ -8,42 +8,51 @@ import {
 	userRelations,
 	verification,
 } from "@indecks/db/schema/auth";
-import { env } from "@indecks/env/server";
+import { ServerConfig } from "@indecks/env/server";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { Context, Effect, Layer } from "effect";
 
-export function createAuth() {
-	const db = createDb();
+export type Auth = ReturnType<typeof betterAuth>;
 
-	return betterAuth({
-		database: drizzleAdapter(db, {
-			provider: "sqlite",
+export class AuthService extends Context.Tag("AuthService")<
+	AuthService,
+	Auth
+>() {}
 
-			schema: {
-				account,
-				accountRelations,
-				session,
-				sessionRelations,
-				user,
-				userRelations,
-				verification,
+export const AuthServiceLive = Layer.effect(
+	AuthService,
+	Effect.gen(function* () {
+		const db = yield* DbService;
+		const config = yield* ServerConfig;
+
+		return betterAuth({
+			database: drizzleAdapter(db, {
+				provider: "sqlite",
+				schema: {
+					account,
+					accountRelations,
+					session,
+					sessionRelations,
+					user,
+					userRelations,
+					verification,
+				},
+			}),
+			trustedOrigins: [config.CORS_ORIGIN],
+			emailAndPassword: {
+				enabled: true,
 			},
-		}),
-		trustedOrigins: [env.CORS_ORIGIN],
-		emailAndPassword: {
-			enabled: true,
-		},
-		secret: env.BETTER_AUTH_SECRET,
-		baseURL: env.BETTER_AUTH_URL,
-		advanced: {
-			defaultCookieAttributes: {
-				sameSite: "none",
-				secure: true,
-				httpOnly: true,
+			secret: config.BETTER_AUTH_SECRET,
+			baseURL: config.BETTER_AUTH_URL,
+			advanced: {
+				defaultCookieAttributes: {
+					sameSite: "none",
+					secure: true,
+					httpOnly: true,
+				},
 			},
-		},
-		plugins: [],
-	});
-}
-
-export const auth = createAuth();
+			plugins: [],
+		}) as Auth;
+	})
+);

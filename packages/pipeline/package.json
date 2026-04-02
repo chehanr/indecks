@@ -10,6 +10,7 @@
     "@indecks/db": "workspace:*",
     "@indecks/vector": "workspace:*",
     "drizzle-orm": "^0.45.2",
+    "effect": "catalog:",
     "nanoid": "^5.1.5"
   },
   "devDependencies": {

@@ -13,7 +13,8 @@
   "dependencies": {
     "@indecks/db": "workspace:*",
     "@indecks/env": "workspace:*",
-    "better-auth": "catalog:"
+    "better-auth": "catalog:",
+    "effect": "catalog:"
   },
   "devDependencies": {
     "@indecks/config": "workspace:*",

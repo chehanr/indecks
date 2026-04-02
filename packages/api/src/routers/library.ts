@@ -1,33 +1,61 @@
 import { access } from "node:fs/promises";
+import { DbService } from "@indecks/db";
 import { chunk as chunkTable } from "@indecks/db/schema/chunk";
 import { job as jobTable } from "@indecks/db/schema/job";
 import { library as libraryTable } from "@indecks/db/schema/library";
 import { video as videoTable } from "@indecks/db/schema/video";
-import { testConnection } from "@indecks/pipeline/embedder";
+import { EmbedService } from "@indecks/pipeline/embedder";
+import {
+	FolderNotAccessibleError,
+	LibraryEmbeddingNotConfiguredError,
+	LibraryNotFoundError,
+	VideoNotFoundError,
+} from "@indecks/pipeline/errors";
+import { VectorDbManagerService } from "@indecks/vector";
 import { eq } from "drizzle-orm";
+import { Effect } from "effect";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
+import { runEffect } from "../effect-trpc";
 import { protectedProcedure, router } from "../index";
 
 export const libraryRouter = router({
-	list: protectedProcedure.query(({ ctx }) => {
-		return ctx.db.select().from(libraryTable).all();
-	}),
+	list: protectedProcedure.query(({ ctx }) =>
+		runEffect(
+			ctx.runtime,
+			Effect.gen(function* () {
+				const db = yield* DbService;
+				return yield* Effect.promise(() =>
+					db.select().from(libraryTable).all()
+				);
+			})
+		)
+	),
 
 	get: protectedProcedure
 		.input(z.object({ id: z.string() }))
-		.query(async ({ ctx, input }) => {
-			const lib = await ctx.db
-				.select()
-				.from(libraryTable)
-				.where(eq(libraryTable.id, input.id))
-				.get();
-			if (!lib) {
-				throw new Error("Library not found");
-			}
-			return lib;
-		}),
+		.query(({ ctx, input }) =>
+			runEffect(
+				ctx.runtime,
+				Effect.gen(function* () {
+					const db = yield* DbService;
+					const lib = yield* Effect.promise(() =>
+						db
+							.select()
+							.from(libraryTable)
+							.where(eq(libraryTable.id, input.id))
+							.get()
+					);
+					if (!lib) {
+						return yield* new LibraryNotFoundError({
+							libraryId: input.id,
+						});
+					}
+					return lib;
+				})
+			)
+		),
 
 	create: protectedProcedure
 		.input(
@@ -44,28 +72,41 @@ export const libraryRouter = router({
 				downscaleFps: z.number().min(1).default(5),
 			})
 		)
-		.mutation(async ({ ctx, input }) => {
-			await access(input.folderPath).catch(() => {
-				throw new Error(`Folder not accessible: ${input.folderPath}`);
-			});
+		.mutation(({ ctx, input }) =>
+			runEffect(
+				ctx.runtime,
+				Effect.gen(function* () {
+					const db = yield* DbService;
 
-			const id = nanoid();
-			await ctx.db.insert(libraryTable).values({
-				id,
-				name: input.name,
-				folderPath: input.folderPath,
-				embeddingInstruction: input.embeddingInstruction || null,
-				embeddingBaseUrl: input.embeddingBaseUrl,
-				embeddingApiKey: input.embeddingApiKey || null,
-				embeddingModel: input.embeddingModel,
-				embeddingDimensions: input.embeddingDimensions,
-				chunkDuration: input.chunkDuration,
-				chunkOverlap: input.chunkOverlap,
-				downscaleFps: input.downscaleFps,
-			});
+					yield* Effect.tryPromise({
+						try: () => access(input.folderPath),
+						catch: () =>
+							new FolderNotAccessibleError({
+								path: input.folderPath,
+							}),
+					});
 
-			return { id };
-		}),
+					const id = nanoid();
+					yield* Effect.promise(() =>
+						db.insert(libraryTable).values({
+							id,
+							name: input.name,
+							folderPath: input.folderPath,
+							embeddingInstruction: input.embeddingInstruction || null,
+							embeddingBaseUrl: input.embeddingBaseUrl,
+							embeddingApiKey: input.embeddingApiKey || null,
+							embeddingModel: input.embeddingModel,
+							embeddingDimensions: input.embeddingDimensions,
+							chunkDuration: input.chunkDuration,
+							chunkOverlap: input.chunkOverlap,
+							downscaleFps: input.downscaleFps,
+						})
+					);
+
+					return { id };
+				})
+			)
+		),
 
 	update: protectedProcedure
 		.input(
@@ -81,146 +122,210 @@ export const libraryRouter = router({
 				downscaleFps: z.number().min(1).optional(),
 			})
 		)
-		.mutation(async ({ ctx, input }) => {
-			const { id, ...fields } = input;
-			const set: Record<string, unknown> = {};
+		.mutation(({ ctx, input }) =>
+			runEffect(
+				ctx.runtime,
+				Effect.gen(function* () {
+					const db = yield* DbService;
+					const { id, ...fields } = input;
+					const set: Record<string, unknown> = {};
 
-			if (fields.embeddingInstruction !== undefined) {
-				set.embeddingInstruction = fields.embeddingInstruction || null;
-			}
-			if (fields.embeddingBaseUrl !== undefined) {
-				set.embeddingBaseUrl = fields.embeddingBaseUrl;
-			}
-			if (fields.embeddingApiKey !== undefined) {
-				set.embeddingApiKey = fields.embeddingApiKey || null;
-			}
-			if (fields.embeddingModel !== undefined) {
-				set.embeddingModel = fields.embeddingModel;
-			}
-			if (fields.embeddingDimensions !== undefined) {
-				set.embeddingDimensions = fields.embeddingDimensions;
-			}
-			if (fields.chunkDuration !== undefined) {
-				set.chunkDuration = fields.chunkDuration;
-			}
-			if (fields.chunkOverlap !== undefined) {
-				set.chunkOverlap = fields.chunkOverlap;
-			}
-			if (fields.downscaleFps !== undefined) {
-				set.downscaleFps = fields.downscaleFps;
-			}
+					if (fields.embeddingInstruction !== undefined) {
+						set.embeddingInstruction = fields.embeddingInstruction || null;
+					}
+					if (fields.embeddingBaseUrl !== undefined) {
+						set.embeddingBaseUrl = fields.embeddingBaseUrl;
+					}
+					if (fields.embeddingApiKey !== undefined) {
+						set.embeddingApiKey = fields.embeddingApiKey || null;
+					}
+					if (fields.embeddingModel !== undefined) {
+						set.embeddingModel = fields.embeddingModel;
+					}
+					if (fields.embeddingDimensions !== undefined) {
+						set.embeddingDimensions = fields.embeddingDimensions;
+					}
+					if (fields.chunkDuration !== undefined) {
+						set.chunkDuration = fields.chunkDuration;
+					}
+					if (fields.chunkOverlap !== undefined) {
+						set.chunkOverlap = fields.chunkOverlap;
+					}
+					if (fields.downscaleFps !== undefined) {
+						set.downscaleFps = fields.downscaleFps;
+					}
 
-			await ctx.db.update(libraryTable).set(set).where(eq(libraryTable.id, id));
+					yield* Effect.promise(() =>
+						db.update(libraryTable).set(set).where(eq(libraryTable.id, id))
+					);
 
-			return { success: true };
-		}),
+					return { success: true };
+				})
+			)
+		),
 
 	delete: protectedProcedure
 		.input(z.object({ id: z.string() }))
-		.mutation(async ({ ctx, input }) => {
-			await ctx.vectorDbManager.remove(input.id);
-			await ctx.db.delete(libraryTable).where(eq(libraryTable.id, input.id));
-
-			return { success: true };
-		}),
+		.mutation(({ ctx, input }) =>
+			runEffect(
+				ctx.runtime,
+				Effect.gen(function* () {
+					const db = yield* DbService;
+					const vectorDbManager = yield* VectorDbManagerService;
+					yield* vectorDbManager.remove(input.id);
+					yield* Effect.promise(() =>
+						db.delete(libraryTable).where(eq(libraryTable.id, input.id))
+					);
+					return { success: true };
+				})
+			)
+		),
 
 	startIndexing: protectedProcedure
 		.input(z.object({ id: z.string() }))
-		.mutation(async ({ ctx, input }) => {
-			const lib = await ctx.db
-				.select()
-				.from(libraryTable)
-				.where(eq(libraryTable.id, input.id))
-				.get();
+		.mutation(({ ctx, input }) =>
+			runEffect(
+				ctx.runtime,
+				Effect.gen(function* () {
+					const db = yield* DbService;
+					const lib = yield* Effect.promise(() =>
+						db
+							.select()
+							.from(libraryTable)
+							.where(eq(libraryTable.id, input.id))
+							.get()
+					);
 
-			if (!lib) {
-				throw new Error("Library not found");
-			}
+					if (!lib) {
+						return yield* new LibraryNotFoundError({
+							libraryId: input.id,
+						});
+					}
 
-			if (
-				!(lib.embeddingBaseUrl && lib.embeddingModel && lib.embeddingDimensions)
-			) {
-				throw new Error("Library embedding not configured");
-			}
+					if (
+						!(
+							lib.embeddingBaseUrl &&
+							lib.embeddingModel &&
+							lib.embeddingDimensions
+						)
+					) {
+						return yield* new LibraryEmbeddingNotConfiguredError({
+							libraryId: input.id,
+						});
+					}
 
-			const jobId = nanoid();
-			await ctx.db.insert(jobTable).values({
-				id: jobId,
-				type: "index_library",
-				libraryId: input.id,
-				status: "pending",
-			});
+					const jobId = nanoid();
+					yield* Effect.promise(() =>
+						db.insert(jobTable).values({
+							id: jobId,
+							type: "index_library",
+							libraryId: input.id,
+							status: "pending",
+						})
+					);
 
-			return { jobId };
-		}),
+					return { jobId };
+				})
+			)
+		),
 
 	reindexVideo: protectedProcedure
 		.input(z.object({ videoId: z.string() }))
-		.mutation(async ({ ctx, input }) => {
-			const vid = await ctx.db
-				.select()
-				.from(videoTable)
-				.where(eq(videoTable.id, input.videoId))
-				.get();
+		.mutation(({ ctx, input }) =>
+			runEffect(
+				ctx.runtime,
+				Effect.gen(function* () {
+					const db = yield* DbService;
+					const vectorDbManager = yield* VectorDbManagerService;
 
-			if (!vid) {
-				throw new Error("Video not found");
-			}
+					const vid = yield* Effect.promise(() =>
+						db
+							.select()
+							.from(videoTable)
+							.where(eq(videoTable.id, input.videoId))
+							.get()
+					);
 
-			const lib = await ctx.db
-				.select()
-				.from(libraryTable)
-				.where(eq(libraryTable.id, vid.libraryId))
-				.get();
+					if (!vid) {
+						return yield* new VideoNotFoundError({
+							videoId: input.videoId,
+						});
+					}
 
-			if (!lib?.embeddingDimensions) {
-				throw new Error("Library embedding not configured");
-			}
+					const lib = yield* Effect.promise(() =>
+						db
+							.select()
+							.from(libraryTable)
+							.where(eq(libraryTable.id, vid.libraryId))
+							.get()
+					);
 
-			const chunks = await ctx.db
-				.select({ id: chunkTable.id })
-				.from(chunkTable)
-				.where(eq(chunkTable.videoId, input.videoId))
-				.all();
+					if (!lib?.embeddingDimensions) {
+						return yield* new LibraryEmbeddingNotConfiguredError({
+							libraryId: vid.libraryId,
+						});
+					}
 
-			const chunkIds = chunks.map((c) => c.id);
-			if (chunkIds.length > 0) {
-				const vectorDb = ctx.vectorDbManager.get(
-					vid.libraryId,
-					lib.embeddingDimensions
-				);
-				vectorDb.removeByChunkIds(chunkIds);
-				await ctx.db
-					.delete(chunkTable)
-					.where(eq(chunkTable.videoId, input.videoId));
-			}
+					const chunks = yield* Effect.promise(() =>
+						db
+							.select({ id: chunkTable.id })
+							.from(chunkTable)
+							.where(eq(chunkTable.videoId, input.videoId))
+							.all()
+					);
 
-			await ctx.db
-				.update(videoTable)
-				.set({ status: "pending", errorMessage: null })
-				.where(eq(videoTable.id, input.videoId));
+					const chunkIds = chunks.map((c) => c.id);
+					if (chunkIds.length > 0) {
+						const vectorDb = yield* vectorDbManager.get(
+							vid.libraryId,
+							lib.embeddingDimensions
+						);
+						yield* vectorDb.removeByChunkIds(chunkIds);
+						yield* Effect.promise(() =>
+							db.delete(chunkTable).where(eq(chunkTable.videoId, input.videoId))
+						);
+					}
 
-			const jobId = nanoid();
-			await ctx.db.insert(jobTable).values({
-				id: jobId,
-				type: "index_video",
-				videoId: input.videoId,
-				libraryId: vid.libraryId,
-				status: "pending",
-			});
+					yield* Effect.promise(() =>
+						db
+							.update(videoTable)
+							.set({ status: "pending", errorMessage: null })
+							.where(eq(videoTable.id, input.videoId))
+					);
 
-			return { jobId };
-		}),
+					const jobId = nanoid();
+					yield* Effect.promise(() =>
+						db.insert(jobTable).values({
+							id: jobId,
+							type: "index_video",
+							videoId: input.videoId,
+							libraryId: vid.libraryId,
+							status: "pending",
+						})
+					);
+
+					return { jobId };
+				})
+			)
+		),
 
 	videos: protectedProcedure
 		.input(z.object({ libraryId: z.string() }))
-		.query(({ ctx, input }) => {
-			return ctx.db
-				.select()
-				.from(videoTable)
-				.where(eq(videoTable.libraryId, input.libraryId))
-				.all();
-		}),
+		.query(({ ctx, input }) =>
+			runEffect(
+				ctx.runtime,
+				Effect.gen(function* () {
+					const db = yield* DbService;
+					return yield* Effect.promise(() =>
+						db
+							.select()
+							.from(videoTable)
+							.where(eq(videoTable.libraryId, input.libraryId))
+							.all()
+					);
+				})
+			)
+		),
 
 	testEmbedding: protectedProcedure
 		.input(
@@ -231,12 +336,18 @@ export const libraryRouter = router({
 				embeddingDimensions: z.number().min(1).default(768),
 			})
 		)
-		.mutation(({ input }) => {
-			return testConnection({
-				baseUrl: input.embeddingBaseUrl,
-				apiKey: input.embeddingApiKey,
-				model: input.embeddingModel,
-				dimensions: input.embeddingDimensions,
-			});
-		}),
+		.mutation(({ ctx, input }) =>
+			runEffect(
+				ctx.runtime,
+				Effect.gen(function* () {
+					const embedSvc = yield* EmbedService;
+					return yield* embedSvc.testConnection({
+						baseUrl: input.embeddingBaseUrl,
+						apiKey: input.embeddingApiKey,
+						model: input.embeddingModel,
+						dimensions: input.embeddingDimensions,
+					});
+				})
+			)
+		),
 });

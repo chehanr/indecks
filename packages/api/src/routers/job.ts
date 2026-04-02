@@ -1,23 +1,34 @@
+import { DbService } from "@indecks/db";
+import { RecordNotFoundError } from "@indecks/db/errors";
 import { job as jobTable } from "@indecks/db/schema/job";
 import { desc, eq } from "drizzle-orm";
+import { Effect } from "effect";
 import { z } from "zod";
 
+import { runEffect } from "../effect-trpc";
 import { protectedProcedure, router } from "../index";
 
 export const jobRouter = router({
 	get: protectedProcedure
 		.input(z.object({ id: z.string() }))
-		.query(async ({ ctx, input }) => {
-			const row = await ctx.db
-				.select()
-				.from(jobTable)
-				.where(eq(jobTable.id, input.id))
-				.get();
-			if (!row) {
-				throw new Error("Job not found");
-			}
-			return row;
-		}),
+		.query(({ ctx, input }) =>
+			runEffect(
+				ctx.runtime,
+				Effect.gen(function* () {
+					const db = yield* DbService;
+					const row = yield* Effect.promise(() =>
+						db.select().from(jobTable).where(eq(jobTable.id, input.id)).get()
+					);
+					if (!row) {
+						return yield* new RecordNotFoundError({
+							entity: "Job",
+							id: input.id,
+						});
+					}
+					return row;
+				})
+			)
+		),
 
 	list: protectedProcedure
 		.input(
@@ -26,31 +37,50 @@ export const jobRouter = router({
 				limit: z.number().min(1).max(100).default(20),
 			})
 		)
-		.query(({ ctx, input }) => {
-			if (input.libraryId) {
-				return ctx.db
-					.select()
-					.from(jobTable)
-					.where(eq(jobTable.libraryId, input.libraryId))
-					.orderBy(desc(jobTable.createdAt))
-					.limit(input.limit)
-					.all();
-			}
-			return ctx.db
-				.select()
-				.from(jobTable)
-				.orderBy(desc(jobTable.createdAt))
-				.limit(input.limit)
-				.all();
-		}),
+		.query(({ ctx, input }) =>
+			runEffect(
+				ctx.runtime,
+				Effect.gen(function* () {
+					const db = yield* DbService;
+					if (input.libraryId) {
+						const libraryId = input.libraryId;
+						return yield* Effect.promise(() =>
+							db
+								.select()
+								.from(jobTable)
+								.where(eq(jobTable.libraryId, libraryId))
+								.orderBy(desc(jobTable.createdAt))
+								.limit(input.limit)
+								.all()
+						);
+					}
+					return yield* Effect.promise(() =>
+						db
+							.select()
+							.from(jobTable)
+							.orderBy(desc(jobTable.createdAt))
+							.limit(input.limit)
+							.all()
+					);
+				})
+			)
+		),
 
 	cancel: protectedProcedure
 		.input(z.object({ id: z.string() }))
-		.mutation(async ({ ctx, input }) => {
-			await ctx.db
-				.update(jobTable)
-				.set({ status: "cancelled" })
-				.where(eq(jobTable.id, input.id));
-			return { success: true };
-		}),
+		.mutation(({ ctx, input }) =>
+			runEffect(
+				ctx.runtime,
+				Effect.gen(function* () {
+					const db = yield* DbService;
+					yield* Effect.promise(() =>
+						db
+							.update(jobTable)
+							.set({ status: "cancelled" })
+							.where(eq(jobTable.id, input.id))
+					);
+					return { success: true };
+				})
+			)
+		),
 });

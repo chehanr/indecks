@@ -1,266 +1,328 @@
-import type { createDb } from "@indecks/db";
+import type { Db } from "@indecks/db";
 import { job as jobTable } from "@indecks/db/schema/job";
 import { library as libraryTable } from "@indecks/db/schema/library";
 import { video as videoTable } from "@indecks/db/schema/video";
-import type { VectorDbManager } from "@indecks/vector";
+import type { VectorDbManagerShape } from "@indecks/vector";
 import { and, eq } from "drizzle-orm";
+import { Context, Effect, type Fiber, Layer, Schedule } from "effect";
 
 import type { EmbedConfig } from "./embedder";
-import { indexLibrary, processVideo, scanLibraryFolder } from "./processor";
+import {
+	JobMissingFieldError,
+	LibraryEmbeddingNotConfiguredError,
+	UnknownJobTypeError,
+} from "./errors";
+import { ProcessorService } from "./processor";
 
-type Db = ReturnType<typeof createDb>;
+type ProgressFn = (progress: number, message: string) => Effect.Effect<void>;
 
-async function getLibraryEmbedConfig(
+const getLibraryEmbedConfig = (
 	db: Db,
 	libraryId: string
-): Promise<EmbedConfig | null> {
-	const lib = await db
-		.select({
-			embeddingBaseUrl: libraryTable.embeddingBaseUrl,
-			embeddingApiKey: libraryTable.embeddingApiKey,
-			embeddingModel: libraryTable.embeddingModel,
-			embeddingDimensions: libraryTable.embeddingDimensions,
-		})
-		.from(libraryTable)
-		.where(eq(libraryTable.id, libraryId))
-		.get();
-
-	if (
-		!(lib?.embeddingBaseUrl && lib.embeddingModel && lib.embeddingDimensions)
-	) {
-		return null;
-	}
-
-	return {
-		baseUrl: lib.embeddingBaseUrl,
-		apiKey: lib.embeddingApiKey ?? "",
-		model: lib.embeddingModel,
-		dimensions: lib.embeddingDimensions,
-	};
-}
-
-async function claimNextJob(db: Db) {
-	const pending = await db
-		.select()
-		.from(jobTable)
-		.where(eq(jobTable.status, "pending"))
-		.orderBy(jobTable.createdAt)
-		.limit(1)
-		.get();
-
-	if (!pending) {
-		return null;
-	}
-
-	await db
-		.update(jobTable)
-		.set({
-			status: "running",
-			startedAt: new Date(),
-		})
-		.where(and(eq(jobTable.id, pending.id), eq(jobTable.status, "pending")));
-
-	const claimed = await db
-		.select()
-		.from(jobTable)
-		.where(and(eq(jobTable.id, pending.id), eq(jobTable.status, "running")))
-		.get();
-
-	return claimed ?? null;
-}
-
-async function updateJobProgress(
-	db: Db,
-	jobId: string,
-	progress: number,
-	message: string
-): Promise<void> {
-	await db
-		.update(jobTable)
-		.set({
-			progress,
-			progressMessage: message,
-		})
-		.where(eq(jobTable.id, jobId));
-}
-
-async function completeJob(db: Db, jobId: string): Promise<void> {
-	await db
-		.update(jobTable)
-		.set({
-			status: "completed",
-			progress: 100,
-			completedAt: new Date(),
-		})
-		.where(eq(jobTable.id, jobId));
-}
-
-async function failJob(db: Db, jobId: string, error: string): Promise<void> {
-	await db
-		.update(jobTable)
-		.set({
-			status: "failed",
-			errorMessage: error,
-			completedAt: new Date(),
-		})
-		.where(eq(jobTable.id, jobId));
-}
-
-async function resolveLibraryId(
-	db: Db,
-	jobRow: typeof jobTable.$inferSelect
-): Promise<string | null> {
-	if (jobRow.libraryId) {
-		return jobRow.libraryId;
-	}
-	if (jobRow.videoId) {
-		const vid = await db
-			.select({ libraryId: videoTable.libraryId })
-			.from(videoTable)
-			.where(eq(videoTable.id, jobRow.videoId))
-			.get();
-		return vid?.libraryId ?? null;
-	}
-	return null;
-}
-
-async function processJob(
-	db: Db,
-	vectorDbManager: VectorDbManager,
-	jobRow: typeof jobTable.$inferSelect
-): Promise<void> {
-	const onProgress = async (progress: number, message: string) => {
-		await updateJobProgress(db, jobRow.id, progress, message);
-	};
-
-	switch (jobRow.type) {
-		case "scan_library": {
-			if (!jobRow.libraryId) {
-				throw new Error("scan_library job missing libraryId");
-			}
-			await scanLibraryFolder(db, jobRow.libraryId, onProgress);
-			break;
-		}
-		case "index_video": {
-			if (!jobRow.videoId) {
-				throw new Error("index_video job missing videoId");
-			}
-			const libraryId = await resolveLibraryId(db, jobRow);
-			if (!libraryId) {
-				throw new Error("Could not resolve libraryId for index_video job");
-			}
-			const embedConfig = await getLibraryEmbedConfig(db, libraryId);
-			if (!embedConfig) {
-				throw new Error("Library embedding not configured");
-			}
-			const vectorDb = vectorDbManager.get(libraryId, embedConfig.dimensions);
-			const lib = await db
+): Effect.Effect<EmbedConfig, LibraryEmbeddingNotConfiguredError> =>
+	Effect.gen(function* () {
+		const lib = yield* Effect.promise(() =>
+			db
 				.select({
-					embeddingInstruction: libraryTable.embeddingInstruction,
-					chunkDuration: libraryTable.chunkDuration,
-					chunkOverlap: libraryTable.chunkOverlap,
-					downscaleFps: libraryTable.downscaleFps,
+					embeddingBaseUrl: libraryTable.embeddingBaseUrl,
+					embeddingApiKey: libraryTable.embeddingApiKey,
+					embeddingModel: libraryTable.embeddingModel,
+					embeddingDimensions: libraryTable.embeddingDimensions,
 				})
 				.from(libraryTable)
 				.where(eq(libraryTable.id, libraryId))
+				.get()
+		);
+
+		if (
+			!(lib?.embeddingBaseUrl && lib.embeddingModel && lib.embeddingDimensions)
+		) {
+			return yield* new LibraryEmbeddingNotConfiguredError({
+				libraryId,
+			});
+		}
+
+		return {
+			baseUrl: lib.embeddingBaseUrl,
+			apiKey: lib.embeddingApiKey ?? "",
+			model: lib.embeddingModel,
+			dimensions: lib.embeddingDimensions,
+		};
+	});
+
+const claimNextJob = (db: Db) =>
+	Effect.tryPromise({
+		try: async () => {
+			const pending = await db
+				.select()
+				.from(jobTable)
+				.where(eq(jobTable.status, "pending"))
+				.orderBy(jobTable.createdAt)
+				.limit(1)
 				.get();
-			await processVideo(
-				db,
-				vectorDb,
-				jobRow.videoId,
-				embedConfig,
-				onProgress,
-				lib?.embeddingInstruction ?? undefined,
-				{
-					chunkDuration: lib?.chunkDuration ?? 30,
-					overlap: lib?.chunkOverlap ?? 5,
-				},
-				lib?.downscaleFps ?? 5
-			);
-			break;
-		}
-		case "index_library": {
-			if (!jobRow.libraryId) {
-				throw new Error("index_library job missing libraryId");
+
+			if (!pending) {
+				return null;
 			}
-			const embedConfig = await getLibraryEmbedConfig(db, jobRow.libraryId);
-			if (!embedConfig) {
-				throw new Error("Library embedding not configured");
-			}
-			const vectorDb = vectorDbManager.get(
-				jobRow.libraryId,
-				embedConfig.dimensions
-			);
-			await indexLibrary(
-				db,
-				vectorDb,
-				jobRow.libraryId,
-				embedConfig,
-				onProgress
-			);
-			break;
-		}
-		default:
-			throw new Error(`Unknown job type: ${jobRow.type}`);
-	}
-}
 
-export async function recoverStaleJobs(db: Db): Promise<number> {
-	const result = await db
-		.update(jobTable)
-		.set({
-			status: "pending",
-			progressMessage: "Recovered after server restart",
-		})
-		.where(eq(jobTable.status, "running"));
+			await db
+				.update(jobTable)
+				.set({ status: "running", startedAt: new Date() })
+				.where(
+					and(eq(jobTable.id, pending.id), eq(jobTable.status, "pending"))
+				);
 
-	return result.rowsAffected;
-}
+			const claimed = await db
+				.select()
+				.from(jobTable)
+				.where(and(eq(jobTable.id, pending.id), eq(jobTable.status, "running")))
+				.get();
 
-export function startWorker(
-	db: Db,
-	vectorDbManager: VectorDbManager,
-	pollInterval = 3000
-): { stop: () => void } {
-	let running = true;
-
-	const runJob = async (
-		jobRow: typeof jobTable.$inferSelect
-	): Promise<void> => {
-		try {
-			await processJob(db, vectorDbManager, jobRow);
-			await completeJob(db, jobRow.id);
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			await failJob(db, jobRow.id, msg);
-			if (jobRow.libraryId) {
-				await db
-					.update(libraryTable)
-					.set({ status: "error" })
-					.where(eq(libraryTable.id, jobRow.libraryId));
-			}
-		}
-	};
-
-	const poll = async () => {
-		while (running) {
-			try {
-				const jobRow = await claimNextJob(db);
-				if (jobRow) {
-					await runJob(jobRow);
-				}
-			} catch {
-				// ignore polling errors
-			}
-			await new Promise((resolve) => setTimeout(resolve, pollInterval));
-		}
-	};
-
-	poll();
-
-	return {
-		stop() {
-			running = false;
+			return claimed ?? null;
 		},
-	};
+		catch: () => null,
+	}).pipe(Effect.catchAll(() => Effect.succeed(null)));
+
+const updateJobProgress = (
+	db: Db,
+	jobId: string,
+	progressVal: number,
+	message: string
+) =>
+	Effect.promise(() =>
+		db
+			.update(jobTable)
+			.set({ progress: progressVal, progressMessage: message })
+			.where(eq(jobTable.id, jobId))
+	).pipe(Effect.ignore);
+
+const completeJob = (db: Db, jobId: string) =>
+	Effect.promise(() =>
+		db
+			.update(jobTable)
+			.set({
+				status: "completed",
+				progress: 100,
+				completedAt: new Date(),
+			})
+			.where(eq(jobTable.id, jobId))
+	).pipe(Effect.ignore);
+
+const failJob = (db: Db, jobId: string, error: string) =>
+	Effect.promise(() =>
+		db
+			.update(jobTable)
+			.set({
+				status: "failed",
+				errorMessage: error,
+				completedAt: new Date(),
+			})
+			.where(eq(jobTable.id, jobId))
+	).pipe(Effect.ignore);
+
+const resolveLibraryId = (
+	db: Db,
+	jobRow: typeof jobTable.$inferSelect
+): Effect.Effect<string | null> =>
+	Effect.gen(function* () {
+		if (jobRow.libraryId) {
+			return jobRow.libraryId;
+		}
+		if (jobRow.videoId) {
+			const videoId = jobRow.videoId;
+			const vid = yield* Effect.promise(() =>
+				db
+					.select({ libraryId: videoTable.libraryId })
+					.from(videoTable)
+					.where(eq(videoTable.id, videoId))
+					.get()
+			);
+			return vid?.libraryId ?? null;
+		}
+		return null;
+	});
+
+export interface JobQueueServiceShape {
+	readonly recoverStaleJobs: (db: Db) => Effect.Effect<number>;
+	readonly startWorker: (
+		db: Db,
+		vectorDbManager: VectorDbManagerShape,
+		pollInterval?: number
+	) => Effect.Effect<Fiber.RuntimeFiber<void>>;
 }
+
+export class JobQueueService extends Context.Tag("JobQueueService")<
+	JobQueueService,
+	JobQueueServiceShape
+>() {}
+
+export const JobQueueServiceLive = Layer.effect(
+	JobQueueService,
+	Effect.gen(function* () {
+		const processor = yield* ProcessorService;
+
+		return {
+			recoverStaleJobs: (db) =>
+				Effect.tryPromise({
+					try: async () => {
+						const result = await db
+							.update(jobTable)
+							.set({
+								status: "pending",
+								progressMessage: "Recovered after server restart",
+							})
+							.where(eq(jobTable.status, "running"));
+						return result.rowsAffected;
+					},
+					catch: () => 0,
+				}).pipe(Effect.catchAll(() => Effect.succeed(0))),
+
+			startWorker: (db, vectorDbManager, pollInterval = 3000) => {
+				const onProgress =
+					(jobId: string): ProgressFn =>
+					(progressVal, message) =>
+						updateJobProgress(db, jobId, progressVal, message);
+
+				const handleScanLibrary = (jobRow: typeof jobTable.$inferSelect) =>
+					Effect.gen(function* () {
+						if (!jobRow.libraryId) {
+							return yield* new JobMissingFieldError({
+								jobType: "scan_library",
+								field: "libraryId",
+							});
+						}
+						yield* processor.scanLibraryFolder(
+							db,
+							jobRow.libraryId,
+							onProgress(jobRow.id)
+						);
+					});
+
+				const handleIndexVideo = (jobRow: typeof jobTable.$inferSelect) =>
+					Effect.gen(function* () {
+						if (!jobRow.videoId) {
+							return yield* new JobMissingFieldError({
+								jobType: "index_video",
+								field: "videoId",
+							});
+						}
+						const libraryId = yield* resolveLibraryId(db, jobRow);
+						if (!libraryId) {
+							return yield* new JobMissingFieldError({
+								jobType: "index_video",
+								field: "libraryId",
+							});
+						}
+						const embedConfig = yield* getLibraryEmbedConfig(db, libraryId);
+						const vectorDb = yield* vectorDbManager.get(
+							libraryId,
+							embedConfig.dimensions
+						);
+						const lib = yield* Effect.promise(() =>
+							db
+								.select({
+									embeddingInstruction: libraryTable.embeddingInstruction,
+									chunkDuration: libraryTable.chunkDuration,
+									chunkOverlap: libraryTable.chunkOverlap,
+									downscaleFps: libraryTable.downscaleFps,
+								})
+								.from(libraryTable)
+								.where(eq(libraryTable.id, libraryId))
+								.get()
+						);
+						yield* processor.processVideo(
+							db,
+							vectorDb,
+							jobRow.videoId,
+							embedConfig,
+							onProgress(jobRow.id),
+							lib?.embeddingInstruction ?? undefined,
+							{
+								chunkDuration: lib?.chunkDuration ?? 30,
+								overlap: lib?.chunkOverlap ?? 5,
+							},
+							lib?.downscaleFps ?? 5
+						);
+					});
+
+				const handleIndexLibrary = (jobRow: typeof jobTable.$inferSelect) =>
+					Effect.gen(function* () {
+						if (!jobRow.libraryId) {
+							return yield* new JobMissingFieldError({
+								jobType: "index_library",
+								field: "libraryId",
+							});
+						}
+						const embedConfig = yield* getLibraryEmbedConfig(
+							db,
+							jobRow.libraryId
+						);
+						const vectorDb = yield* vectorDbManager.get(
+							jobRow.libraryId,
+							embedConfig.dimensions
+						);
+						yield* processor.indexLibrary(
+							db,
+							vectorDb,
+							jobRow.libraryId,
+							embedConfig,
+							onProgress(jobRow.id)
+						);
+					});
+
+				const processJob = (jobRow: typeof jobTable.$inferSelect) =>
+					Effect.gen(function* () {
+						switch (jobRow.type) {
+							case "scan_library":
+								yield* handleScanLibrary(jobRow);
+								break;
+							case "index_video":
+								yield* handleIndexVideo(jobRow);
+								break;
+							case "index_library":
+								yield* handleIndexLibrary(jobRow);
+								break;
+							default:
+								return yield* new UnknownJobTypeError({
+									jobType: jobRow.type,
+								});
+						}
+					});
+
+				const runJob = (jobRow: typeof jobTable.$inferSelect) =>
+					processJob(jobRow).pipe(
+						Effect.tap(() => completeJob(db, jobRow.id)),
+						Effect.catchAll((err) =>
+							Effect.gen(function* () {
+								const msg =
+									"_tag" in err ? (err as { _tag: string })._tag : String(err);
+								yield* failJob(db, jobRow.id, msg);
+								if (jobRow.libraryId) {
+									yield* Effect.promise(() =>
+										db
+											.update(libraryTable)
+											.set({ status: "error" })
+											.where(eq(libraryTable.id, jobRow.libraryId as string))
+									).pipe(Effect.ignore);
+								}
+							})
+						)
+					);
+
+				const pollOnce = Effect.gen(function* () {
+					const jobRow = yield* claimNextJob(db);
+					if (jobRow) {
+						yield* runJob(jobRow);
+					}
+				});
+
+				return pollOnce.pipe(
+					Effect.repeat(Schedule.spaced(`${pollInterval} millis`)),
+					Effect.catchAll(() => Effect.void),
+					Effect.asVoid,
+					Effect.forkDaemon
+				);
+			},
+		};
+	})
+);

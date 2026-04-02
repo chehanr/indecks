@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { createEnv } from "@t3-oss/env-core";
+import { Context, Layer } from "effect";
 import { z } from "zod";
 
 export const env = createEnv({
@@ -16,3 +17,12 @@ export const env = createEnv({
 	runtimeEnv: process.env,
 	emptyStringAsUndefined: true,
 });
+
+export type ServerConfigShape = typeof env;
+
+export class ServerConfig extends Context.Tag("ServerConfig")<
+	ServerConfig,
+	ServerConfigShape
+>() {}
+
+export const ServerConfigLive = Layer.sync(ServerConfig, () => env);

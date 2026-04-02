@@ -3,14 +3,15 @@ import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { trpcServer } from "@hono/trpc-server";
-import { createContext } from "@indecks/api/context";
+import { createTrpcContext, makeAppLayer } from "@indecks/api/context";
 import { appRouter } from "@indecks/api/routers/index";
-import { auth } from "@indecks/auth";
-import { db } from "@indecks/db";
+import { AuthService } from "@indecks/auth";
+import { DbService } from "@indecks/db";
 import { library as libraryTable } from "@indecks/db/schema/library";
 import { env } from "@indecks/env/server";
-import { recoverStaleJobs, startWorker } from "@indecks/pipeline/queue";
-import { VectorDbManager } from "@indecks/vector";
+import { JobQueueService } from "@indecks/pipeline/queue";
+import { VectorDbManagerService } from "@indecks/vector";
+import { Effect, Fiber, ManagedRuntime } from "effect";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
@@ -19,10 +20,26 @@ const RANGE_PATTERN = /bytes=(\d+)-(\d*)/;
 
 const vectorDbDir = resolve(env.VECTOR_DB_DIR);
 mkdirSync(vectorDbDir, { recursive: true });
-const vectorDbManager = new VectorDbManager(vectorDbDir);
 
-await recoverStaleJobs(db);
-startWorker(db, vectorDbManager);
+const appLayer = makeAppLayer(vectorDbDir);
+const appRuntime = ManagedRuntime.make(appLayer);
+
+const workerFiber = await appRuntime.runPromise(
+	Effect.gen(function* () {
+		const jobQueue = yield* JobQueueService;
+		const db = yield* DbService;
+		const vectorDbManager = yield* VectorDbManagerService;
+
+		const recovered = yield* jobQueue.recoverStaleJobs(db);
+		if (recovered > 0) {
+			console.info(`Recovered ${recovered} stale jobs`);
+		}
+
+		return yield* jobQueue.startWorker(db, vectorDbManager);
+	})
+);
+
+const auth = await appRuntime.runPromise(AuthService);
 
 const app = new Hono();
 
@@ -44,9 +61,7 @@ app.use(
 	"/trpc/*",
 	trpcServer({
 		router: appRouter,
-		createContext: (_opts, context) => {
-			return createContext({ context, db, vectorDbManager });
-		},
+		createContext: (_opts, context) => createTrpcContext(context, appRuntime),
 	})
 );
 
@@ -58,7 +73,13 @@ app.get("/api/video", async (c) => {
 
 	const absPath = resolve(filePath);
 
-	const libraries = await db.select().from(libraryTable).all();
+	const libraries = await appRuntime.runPromise(
+		Effect.gen(function* () {
+			const db = yield* DbService;
+			return yield* Effect.promise(() => db.select().from(libraryTable).all());
+		})
+	);
+
 	const isAllowed = libraries.some((lib) =>
 		absPath.startsWith(resolve(lib.folderPath))
 	);
@@ -109,5 +130,17 @@ app.get("/api/video", async (c) => {
 app.get("/", (c) => {
 	return c.text("OK");
 });
+
+const shutdown = async () => {
+	console.info("Shutting down...");
+	await appRuntime
+		.runPromise(Fiber.interrupt(workerFiber))
+		.catch(() => undefined);
+	await appRuntime.dispose().catch(() => undefined);
+	process.exit(0);
+};
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);
 
 export default app;

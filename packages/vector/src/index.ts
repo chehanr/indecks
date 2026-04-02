@@ -1,7 +1,14 @@
 import { Database } from "bun:sqlite";
 import { unlink } from "node:fs/promises";
 import { resolve } from "node:path";
+import { Context, Effect, Layer, Ref } from "effect";
 import { getLoadablePath } from "sqlite-vec";
+
+import {
+	SqliteLoadError,
+	VectorDbDimensionMismatchError,
+	VectorDbError,
+} from "./errors";
 
 const SQLITE_LIB_PATHS = [
 	"/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib",
@@ -10,155 +17,262 @@ const SQLITE_LIB_PATHS = [
 	"/usr/lib/libsqlite3.so",
 ];
 
-function loadCustomSQLite(): void {
-	for (const p of SQLITE_LIB_PATHS) {
-		try {
-			Database.setCustomSQLite(p);
-			return;
-		} catch {
-			// try next path
+const loadCustomSQLite = Effect.try({
+	try: () => {
+		for (const p of SQLITE_LIB_PATHS) {
+			try {
+				Database.setCustomSQLite(p);
+				return;
+			} catch {
+				// try next path
+			}
 		}
-	}
-	throw new Error(
-		"Could not find a system SQLite with extension support. Install sqlite via brew or apt."
-	);
-}
+		throw new Error("No system SQLite with extension support found");
+	},
+	catch: (e) =>
+		new SqliteLoadError({
+			message: e instanceof Error ? e.message : String(e),
+		}),
+});
 
-interface VectorSearchResult {
+export interface VectorSearchResult {
 	chunkId: string;
 	distance: number;
 }
 
-loadCustomSQLite();
-
-export class VectorDb {
-	private readonly db: Database;
-	private readonly dimensions: number;
-
-	constructor(dbPath: string, dimensions = 768) {
-		this.dimensions = dimensions;
-		this.db = new Database(dbPath);
-		this.db.loadExtension(getLoadablePath());
-		this.db.exec("PRAGMA journal_mode=WAL");
-		this.db.exec(
-			`CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
-				chunk_id TEXT PRIMARY KEY,
-				embedding FLOAT[${dimensions}] distance_metric=cosine
-			)`
-		);
-	}
-
-	upsert(chunkId: string, embedding: Float32Array): void {
-		this.db
-			.prepare(
-				"INSERT OR REPLACE INTO vec_chunks(chunk_id, embedding) VALUES (?, vec_f32(?))"
-			)
-			.run(chunkId, embedding);
-	}
-
-	upsertBatch(
+export interface VectorDb {
+	readonly close: () => Effect.Effect<void>;
+	readonly count: () => Effect.Effect<number, VectorDbError>;
+	readonly getDimensions: () => number;
+	readonly removeByChunkIds: (
+		ids: string[]
+	) => Effect.Effect<void, VectorDbError>;
+	readonly search: (
+		query: Float32Array,
+		limit?: number
+	) => Effect.Effect<VectorSearchResult[], VectorDbError>;
+	readonly upsert: (
+		chunkId: string,
+		embedding: Float32Array
+	) => Effect.Effect<void, VectorDbError>;
+	readonly upsertBatch: (
 		items: Array<{ chunkId: string; embedding: Float32Array }>
-	): void {
-		const stmt = this.db.prepare(
-			"INSERT OR REPLACE INTO vec_chunks(chunk_id, embedding) VALUES (?, vec_f32(?))"
-		);
-		const tx = this.db.transaction(() => {
-			for (const item of items) {
-				stmt.run(item.chunkId, item.embedding);
-			}
-		});
-		tx();
-	}
-
-	search(query: Float32Array, limit = 10): VectorSearchResult[] {
-		const rows = this.db
-			.prepare(
-				`SELECT chunk_id, distance
-				FROM vec_chunks
-				WHERE embedding MATCH ?
-				ORDER BY distance
-				LIMIT ?`
-			)
-			.all(query, limit) as Array<{ chunk_id: string; distance: number }>;
-
-		return rows.map((row) => ({
-			chunkId: row.chunk_id,
-			distance: row.distance,
-		}));
-	}
-
-	removeByChunkIds(ids: string[]): void {
-		if (ids.length === 0) {
-			return;
-		}
-		const placeholders = ids.map(() => "?").join(",");
-		this.db
-			.prepare(`DELETE FROM vec_chunks WHERE chunk_id IN (${placeholders})`)
-			.run(...ids);
-	}
-
-	count(): number {
-		const row = this.db
-			.prepare("SELECT count(*) as cnt FROM vec_chunks")
-			.get() as { cnt: number } | null;
-		return row?.cnt ?? 0;
-	}
-
-	close(): void {
-		this.db.close();
-	}
-
-	getDimensions(): number {
-		return this.dimensions;
-	}
+	) => Effect.Effect<void, VectorDbError>;
 }
 
-export class VectorDbManager {
-	private readonly dir: string;
-	private readonly cache: Map<string, VectorDb> = new Map();
+const makeVectorDb = (
+	dbPath: string,
+	dimensions: number
+): Effect.Effect<VectorDb, VectorDbError> =>
+	Effect.try({
+		try: () => {
+			const db = new Database(dbPath);
+			db.loadExtension(getLoadablePath());
+			db.exec("PRAGMA journal_mode=WAL");
+			db.exec(
+				`CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
+					chunk_id TEXT PRIMARY KEY,
+					embedding FLOAT[${dimensions}] distance_metric=cosine
+				)`
+			);
 
-	constructor(dir: string) {
-		this.dir = dir;
-	}
+			const vdb: VectorDb = {
+				upsert: (chunkId, embedding) =>
+					Effect.try({
+						try: () => {
+							db.prepare(
+								"INSERT OR REPLACE INTO vec_chunks(chunk_id, embedding) VALUES (?, vec_f32(?))"
+							).run(chunkId, embedding);
+						},
+						catch: (e) =>
+							new VectorDbError({
+								message: `upsert failed: ${e}`,
+								cause: e,
+							}),
+					}),
 
-	get(libraryId: string, dimensions: number): VectorDb {
-		const existing = this.cache.get(libraryId);
-		if (existing) {
-			if (existing.getDimensions() !== dimensions) {
-				throw new Error(
-					`VectorDb for library ${libraryId} has ${existing.getDimensions()} dimensions, but ${dimensions} requested`
-				);
-			}
-			return existing;
-		}
-		const dbPath = resolve(this.dir, `vector-${libraryId}.db`);
-		const vdb = new VectorDb(dbPath, dimensions);
-		this.cache.set(libraryId, vdb);
-		return vdb;
-	}
+				upsertBatch: (items) =>
+					Effect.try({
+						try: () => {
+							const stmt = db.prepare(
+								"INSERT OR REPLACE INTO vec_chunks(chunk_id, embedding) VALUES (?, vec_f32(?))"
+							);
+							const tx = db.transaction(() => {
+								for (const item of items) {
+									stmt.run(item.chunkId, item.embedding);
+								}
+							});
+							tx();
+						},
+						catch: (e) =>
+							new VectorDbError({
+								message: `upsertBatch failed: ${e}`,
+								cause: e,
+							}),
+					}),
 
-	async remove(libraryId: string): Promise<void> {
-		const existing = this.cache.get(libraryId);
-		if (existing) {
-			existing.close();
-			this.cache.delete(libraryId);
-		}
-		const dbPath = resolve(this.dir, `vector-${libraryId}.db`);
-		await unlink(dbPath).catch(() => {
-			// file may not exist
-		});
-		await unlink(`${dbPath}-wal`).catch(() => {
-			// file may not exist
-		});
-		await unlink(`${dbPath}-shm`).catch(() => {
-			// file may not exist
-		});
-	}
+				search: (query, limit = 10) =>
+					Effect.try({
+						try: () => {
+							const rows = db
+								.prepare(
+									`SELECT chunk_id, distance
+									FROM vec_chunks
+									WHERE embedding MATCH ?
+									ORDER BY distance
+									LIMIT ?`
+								)
+								.all(query, limit) as Array<{
+								chunk_id: string;
+								distance: number;
+							}>;
+							return rows.map((row) => ({
+								chunkId: row.chunk_id,
+								distance: row.distance,
+							}));
+						},
+						catch: (e) =>
+							new VectorDbError({
+								message: `search failed: ${e}`,
+								cause: e,
+							}),
+					}),
 
-	closeAll(): void {
-		for (const vdb of this.cache.values()) {
-			vdb.close();
-		}
-		this.cache.clear();
-	}
+				removeByChunkIds: (ids) =>
+					Effect.try({
+						try: () => {
+							if (ids.length === 0) {
+								return;
+							}
+							const placeholders = ids.map(() => "?").join(",");
+							db.prepare(
+								`DELETE FROM vec_chunks WHERE chunk_id IN (${placeholders})`
+							).run(...ids);
+						},
+						catch: (e) =>
+							new VectorDbError({
+								message: `removeByChunkIds failed: ${e}`,
+								cause: e,
+							}),
+					}),
+
+				count: () =>
+					Effect.try({
+						try: () => {
+							const row = db
+								.prepare("SELECT count(*) as cnt FROM vec_chunks")
+								.get() as { cnt: number } | null;
+							return row?.cnt ?? 0;
+						},
+						catch: (e) =>
+							new VectorDbError({
+								message: `count failed: ${e}`,
+								cause: e,
+							}),
+					}),
+
+				close: () =>
+					Effect.sync(() => {
+						db.close();
+					}),
+
+				getDimensions: () => dimensions,
+			};
+
+			return vdb;
+		},
+		catch: (e) =>
+			new VectorDbError({
+				message: `Failed to open vector DB: ${e}`,
+				cause: e,
+			}),
+	});
+
+export interface VectorDbManagerShape {
+	readonly closeAll: () => Effect.Effect<void>;
+	readonly get: (
+		libraryId: string,
+		dimensions: number
+	) => Effect.Effect<VectorDb, VectorDbError | VectorDbDimensionMismatchError>;
+	readonly remove: (libraryId: string) => Effect.Effect<void, VectorDbError>;
 }
+
+export class VectorDbManagerService extends Context.Tag(
+	"VectorDbManagerService"
+)<VectorDbManagerService, VectorDbManagerShape>() {}
+
+export const VectorDbManagerServiceLive = (dir: string) =>
+	Layer.scoped(
+		VectorDbManagerService,
+		Effect.gen(function* () {
+			yield* loadCustomSQLite;
+			const cache = yield* Ref.make(new Map<string, VectorDb>());
+
+			yield* Effect.addFinalizer(() =>
+				Effect.gen(function* () {
+					const map = yield* Ref.get(cache);
+					for (const vdb of map.values()) {
+						yield* vdb.close();
+					}
+				})
+			);
+
+			return {
+				get: (libraryId, dimensions) =>
+					Effect.gen(function* () {
+						const map = yield* Ref.get(cache);
+						const existing = map.get(libraryId);
+						if (existing) {
+							if (existing.getDimensions() !== dimensions) {
+								return yield* new VectorDbDimensionMismatchError({
+									libraryId,
+									expected: existing.getDimensions(),
+									actual: dimensions,
+								});
+							}
+							return existing;
+						}
+						const dbPath = resolve(dir, `vector-${libraryId}.db`);
+						const vdb = yield* makeVectorDb(dbPath, dimensions);
+						yield* Ref.update(cache, (m) => new Map(m).set(libraryId, vdb));
+						return vdb;
+					}),
+
+				remove: (libraryId) =>
+					Effect.gen(function* () {
+						const map = yield* Ref.get(cache);
+						const existing = map.get(libraryId);
+						if (existing) {
+							yield* existing.close();
+							yield* Ref.update(cache, (m) => {
+								const next = new Map(m);
+								next.delete(libraryId);
+								return next;
+							});
+						}
+						const dbPath = resolve(dir, `vector-${libraryId}.db`);
+						yield* Effect.tryPromise({
+							try: async () => {
+								await unlink(dbPath).catch(() => undefined);
+								await unlink(`${dbPath}-wal`).catch(() => undefined);
+								await unlink(`${dbPath}-shm`).catch(() => undefined);
+							},
+							catch: (e) =>
+								new VectorDbError({
+									message: `Failed to remove vector DB files: ${e}`,
+									cause: e,
+								}),
+						});
+					}),
+
+				closeAll: () =>
+					Effect.gen(function* () {
+						const map = yield* Ref.get(cache);
+						for (const vdb of map.values()) {
+							yield* vdb.close();
+						}
+						yield* Ref.set(cache, new Map());
+					}),
+			};
+		})
+	);

@@ -10,6 +10,7 @@
     "start": "bun run dist/index.mjs"
   },
   "dependencies": {
+    "@effect/platform-bun": "catalog:",
     "@hono/trpc-server": "^0.4.0",
     "@indecks/api": "workspace:*",
     "@indecks/auth": "workspace:*",
@@ -17,6 +18,7 @@
     "@indecks/env": "workspace:*",
     "@indecks/pipeline": "workspace:*",
     "@indecks/vector": "workspace:*",
+    "effect": "catalog:",
     "hono": "catalog:"
   },
   "devDependencies": {
