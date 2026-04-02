@@ -33,6 +33,7 @@ export const libraryRouter = router({
 			z.object({
 				name: z.string().min(1),
 				folderPath: z.string().min(1),
+				embeddingInstruction: z.string().trim().optional(),
 			})
 		)
 		.mutation(async ({ ctx, input }) => {
@@ -45,9 +46,28 @@ export const libraryRouter = router({
 				id,
 				name: input.name,
 				folderPath: input.folderPath,
+				embeddingInstruction: input.embeddingInstruction || null,
 			});
 
 			return { id };
+		}),
+
+	update: protectedProcedure
+		.input(
+			z.object({
+				id: z.string(),
+				embeddingInstruction: z.string().trim().optional(),
+			})
+		)
+		.mutation(async ({ ctx, input }) => {
+			await ctx.db
+				.update(libraryTable)
+				.set({
+					embeddingInstruction: input.embeddingInstruction || null,
+				})
+				.where(eq(libraryTable.id, input.id));
+
+			return { success: true };
 		}),
 
 	delete: protectedProcedure
@@ -88,6 +108,50 @@ export const libraryRouter = router({
 				id: jobId,
 				type: "index_library",
 				libraryId: input.id,
+				status: "pending",
+			});
+
+			return { jobId };
+		}),
+
+	reindexVideo: protectedProcedure
+		.input(z.object({ videoId: z.string() }))
+		.mutation(async ({ ctx, input }) => {
+			const vid = await ctx.db
+				.select()
+				.from(videoTable)
+				.where(eq(videoTable.id, input.videoId))
+				.get();
+
+			if (!vid) {
+				throw new Error("Video not found");
+			}
+
+			const chunks = await ctx.db
+				.select({ id: chunkTable.id })
+				.from(chunkTable)
+				.where(eq(chunkTable.videoId, input.videoId))
+				.all();
+
+			const chunkIds = chunks.map((c) => c.id);
+			if (chunkIds.length > 0) {
+				ctx.vectorDb.removeByChunkIds(chunkIds);
+				await ctx.db
+					.delete(chunkTable)
+					.where(eq(chunkTable.videoId, input.videoId));
+			}
+
+			await ctx.db
+				.update(videoTable)
+				.set({ status: "pending", errorMessage: null })
+				.where(eq(videoTable.id, input.videoId));
+
+			const jobId = nanoid();
+			await ctx.db.insert(jobTable).values({
+				id: jobId,
+				type: "index_video",
+				videoId: input.videoId,
+				libraryId: vid.libraryId,
 				status: "pending",
 			});
 

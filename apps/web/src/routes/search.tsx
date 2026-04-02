@@ -32,6 +32,7 @@ function formatTime(seconds: number): string {
 
 interface SearchResult {
 	chunkId: string;
+	distance: number;
 	endTime: number;
 	fileName: string;
 	filePath: string;
@@ -53,7 +54,6 @@ function VideoPlayer({
 	const src = `${serverUrl}/api/video?path=${encodeURIComponent(filePath)}#t=${startTime}`;
 
 	return (
-		// biome-ignore lint/a11y/useMediaCaption: video files may not have captions
 		<video
 			className="w-full rounded-md"
 			controls
@@ -91,6 +91,10 @@ function SearchResultCard({ result }: { result: SearchResult }) {
 								{showPlayer ? "Hide" : "Play"}
 							</Button>
 						</div>
+					</div>
+					<div className="font-mono text-[10px] text-muted-foreground">
+						chunk: {result.chunkId} | distance: {result.distance.toFixed(4)} |
+						video: {result.videoId}
 					</div>
 					{showPlayer && (
 						<VideoPlayer
@@ -170,20 +174,30 @@ function SearchPage() {
 				</CardContent>
 			</Card>
 
-			{searchResults.data && searchResults.data.length > 0 && (
+			{searchResults.data?.debug && (
+				<div className="font-mono text-muted-foreground text-xs">
+					{searchResults.data.results.length} results from{" "}
+					{searchResults.data.debug.totalVectors} vectors (
+					{searchResults.data.debug.dimensions}d) | embed:{" "}
+					{searchResults.data.debug.embedMs}ms | search:{" "}
+					{searchResults.data.debug.searchMs}ms
+				</div>
+			)}
+
+			{searchResults.data && searchResults.data.results.length > 0 && (
 				<Card>
 					<CardHeader>
-						<CardTitle>Results ({searchResults.data.length})</CardTitle>
+						<CardTitle>Results ({searchResults.data.results.length})</CardTitle>
 					</CardHeader>
 					<CardContent className="space-y-3">
-						{searchResults.data.map((result) => (
+						{searchResults.data.results.map((result) => (
 							<SearchResultCard key={result.chunkId} result={result} />
 						))}
 					</CardContent>
 				</Card>
 			)}
 
-			{searchResults.data?.length === 0 && (
+			{searchResults.data?.results.length === 0 && (
 				<p className="text-muted-foreground text-sm">
 					No results found. Try a different query.
 				</p>

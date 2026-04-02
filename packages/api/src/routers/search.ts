@@ -1,4 +1,5 @@
 import { chunk as chunkTable } from "@indecks/db/schema/chunk";
+import { library as libraryTable } from "@indecks/db/schema/library";
 import { settings as settingsTable } from "@indecks/db/schema/settings";
 import { video as videoTable } from "@indecks/db/schema/video";
 import type { EmbedConfig } from "@indecks/pipeline/embedder";
@@ -54,14 +55,43 @@ export const searchRouter = router({
 				throw new Error("Embedding API not configured");
 			}
 
-			const queryEmbedding = await embedText(input.query, embedConfig);
+			let instruction: string | undefined;
+			if (input.libraryId) {
+				const lib = await ctx.db
+					.select({ embeddingInstruction: libraryTable.embeddingInstruction })
+					.from(libraryTable)
+					.where(eq(libraryTable.id, input.libraryId))
+					.get();
+				instruction = lib?.embeddingInstruction ?? undefined;
+			}
+
+			const t0 = performance.now();
+			const queryEmbedding = await embedText(
+				input.query,
+				embedConfig,
+				instruction
+			);
+			const embedMs = Math.round(performance.now() - t0);
+
+			const totalVectors = ctx.vectorDb.count();
+
+			const t1 = performance.now();
 			const results = ctx.vectorDb.search(
 				new Float32Array(queryEmbedding),
 				input.limit * 2
 			);
+			const searchMs = Math.round(performance.now() - t1);
 
 			if (results.length === 0) {
-				return [];
+				return {
+					results: [],
+					debug: {
+						embedMs,
+						searchMs,
+						totalVectors,
+						dimensions: queryEmbedding.length,
+					},
+				};
 			}
 
 			const chunkIds = results.map((r) => r.chunkId);
@@ -82,7 +112,7 @@ export const searchRouter = router({
 
 			const chunkMap = new Map(chunks.map((c) => [c.chunkId, c]));
 
-			return results
+			const filtered = results
 				.map((r) => {
 					const chunkData = chunkMap.get(r.chunkId);
 					if (!chunkData) {
@@ -105,5 +135,15 @@ export const searchRouter = router({
 				})
 				.filter((r): r is NonNullable<typeof r> => r !== null)
 				.slice(0, input.limit);
+
+			return {
+				results: filtered,
+				debug: {
+					embedMs,
+					searchMs,
+					totalVectors,
+					dimensions: queryEmbedding.length,
+				},
+			};
 		}),
 });

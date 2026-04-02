@@ -29,14 +29,19 @@ export const Route = createFileRoute("/libraries/")({
 function CreateLibraryForm() {
 	const [name, setName] = useState("");
 	const [folderPath, setFolderPath] = useState("");
+	const [embeddingInstruction, setEmbeddingInstruction] = useState("");
 
 	const createMutation = useMutation({
-		mutationFn: (input: { name: string; folderPath: string }) =>
-			trpcClient.library.create.mutate(input),
+		mutationFn: (input: {
+			name: string;
+			folderPath: string;
+			embeddingInstruction?: string;
+		}) => trpcClient.library.create.mutate(input),
 		onSuccess: () => {
 			toast.success("Library created");
 			setName("");
 			setFolderPath("");
+			setEmbeddingInstruction("");
 			queryClient.invalidateQueries({ queryKey: [["library", "list"]] });
 		},
 		onError: (err) => {
@@ -57,7 +62,11 @@ function CreateLibraryForm() {
 					className="flex flex-col gap-4"
 					onSubmit={(e) => {
 						e.preventDefault();
-						createMutation.mutate({ name, folderPath });
+						createMutation.mutate({
+							name,
+							folderPath,
+							embeddingInstruction: embeddingInstruction || undefined,
+						});
 					}}
 				>
 					<div className="flex flex-col gap-2">
@@ -77,6 +86,21 @@ function CreateLibraryForm() {
 							placeholder="/path/to/videos"
 							value={folderPath}
 						/>
+					</div>
+					<div className="flex flex-col gap-2">
+						<Label htmlFor="embeddingInstruction">
+							Embedding Instruction (optional)
+						</Label>
+						<Input
+							id="embeddingInstruction"
+							onChange={(e) => setEmbeddingInstruction(e.target.value)}
+							placeholder="Represent the visual content."
+							value={embeddingInstruction}
+						/>
+						<p className="text-muted-foreground text-xs">
+							System prompt sent to the embedding model. Leave blank for
+							default.
+						</p>
 					</div>
 					<Button
 						disabled={createMutation.isPending || !name || !folderPath}

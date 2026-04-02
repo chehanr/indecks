@@ -5,8 +5,11 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@indecks/ui/components/card";
+import { Input } from "@indecks/ui/components/input";
+import { Label } from "@indecks/ui/components/label";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { authClient } from "@/lib/auth-client";
@@ -98,6 +101,58 @@ function IndexingProgress({ jobId }: { jobId: string }) {
 	);
 }
 
+function VideoRow({
+	video,
+}: {
+	video: {
+		id: string;
+		fileName: string;
+		duration: number | null;
+		status: string;
+	};
+}) {
+	const reindexMutation = useMutation({
+		mutationFn: () =>
+			trpcClient.library.reindexVideo.mutate({ videoId: video.id }),
+		onSuccess: () => {
+			toast.success(`Re-indexing ${video.fileName}`);
+			queryClient.invalidateQueries({ queryKey: [["library", "videos"]] });
+			queryClient.invalidateQueries({ queryKey: [["job", "list"]] });
+		},
+		onError: (err) => {
+			toast.error(err.message);
+		},
+	});
+
+	return (
+		<div className="flex items-center justify-between py-2">
+			<div className="min-w-0 flex-1">
+				<p className="truncate font-medium text-sm">{video.fileName}</p>
+				{video.duration != null && (
+					<p className="text-muted-foreground text-xs">
+						{Math.round(video.duration)}s
+					</p>
+				)}
+			</div>
+			<div className="ml-2 flex items-center gap-2">
+				<span
+					className={`rounded-full px-2 py-0.5 text-xs ${getVideoStatusClass(video.status)}`}
+				>
+					{video.status}
+				</span>
+				<Button
+					disabled={reindexMutation.isPending || video.status === "processing"}
+					onClick={() => reindexMutation.mutate()}
+					size="sm"
+					variant="ghost"
+				>
+					Re-index
+				</Button>
+			</div>
+		</div>
+	);
+}
+
 function LibraryDetailPage() {
 	const { libraryId } = Route.useParams();
 	const navigate = useNavigate();
@@ -133,7 +188,26 @@ function LibraryDetailPage() {
 		},
 	});
 
+	const updateMutation = useMutation({
+		mutationFn: (input: { id: string; embeddingInstruction?: string }) =>
+			trpcClient.library.update.mutate(input),
+		onSuccess: () => {
+			toast.success("Library updated");
+			queryClient.invalidateQueries({ queryKey: [["library", "get"]] });
+		},
+		onError: (err) => {
+			toast.error(err.message);
+		},
+	});
+
+	const [instruction, setInstruction] = useState("");
+
 	const library = libraryQuery.data;
+
+	useEffect(() => {
+		setInstruction(library?.embeddingInstruction ?? "");
+	}, [library?.embeddingInstruction]);
+
 	if (libraryQuery.isLoading) {
 		return (
 			<div className="container mx-auto max-w-3xl px-4 py-6">
@@ -179,6 +253,44 @@ function LibraryDetailPage() {
 				</div>
 			</div>
 
+			<Card>
+				<CardHeader>
+					<CardTitle>Embedding Instruction</CardTitle>
+				</CardHeader>
+				<CardContent>
+					<div className="flex flex-col gap-3">
+						<div className="flex flex-col gap-2">
+							<Label htmlFor="instruction">System Prompt</Label>
+							<Input
+								id="instruction"
+								onChange={(e) => setInstruction(e.target.value)}
+								placeholder="Represent the visual content."
+								value={instruction}
+							/>
+							<p className="text-muted-foreground text-xs">
+								Overrides the system prompt sent to the embedding model during
+								indexing and search. Leave blank for default.
+							</p>
+						</div>
+						<Button
+							disabled={
+								updateMutation.isPending ||
+								instruction === (library.embeddingInstruction ?? "")
+							}
+							onClick={() =>
+								updateMutation.mutate({
+									id: libraryId,
+									embeddingInstruction: instruction || undefined,
+								})
+							}
+							size="sm"
+						>
+							{updateMutation.isPending ? "Saving..." : "Save"}
+						</Button>
+					</div>
+				</CardContent>
+			</Card>
+
 			{activeJob && <IndexingProgress jobId={activeJob.id} />}
 
 			<Card>
@@ -197,26 +309,7 @@ function LibraryDetailPage() {
 					{videosQuery.data && videosQuery.data.length > 0 && (
 						<div className="divide-y">
 							{videosQuery.data.map((video) => (
-								<div
-									className="flex items-center justify-between py-2"
-									key={video.id}
-								>
-									<div className="min-w-0 flex-1">
-										<p className="truncate font-medium text-sm">
-											{video.fileName}
-										</p>
-										{video.duration != null && (
-											<p className="text-muted-foreground text-xs">
-												{Math.round(video.duration)}s
-											</p>
-										)}
-									</div>
-									<span
-										className={`ml-2 rounded-full px-2 py-0.5 text-xs ${getVideoStatusClass(video.status)}`}
-									>
-										{video.status}
-									</span>
-								</div>
+								<VideoRow key={video.id} video={video} />
 							))}
 						</div>
 					)}

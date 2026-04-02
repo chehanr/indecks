@@ -14,6 +14,7 @@ export const library = sqliteTable(
 		})
 			.default("idle")
 			.notNull(),
+		embeddingInstruction: text("embedding_instruction"),
 		videoCount: integer("video_count").default(0).notNull(),
 		createdAt: integer("created_at", { mode: "timestamp_ms" })
 			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)

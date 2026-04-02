@@ -19,9 +19,13 @@ interface EmbeddingResponse {
 	};
 }
 
+const DEFAULT_VIDEO_INSTRUCTION = "Represent the visual content.";
+const DEFAULT_TEXT_INSTRUCTION = "Represent the user's input.";
+
 export async function embedVideo(
 	videoBuffer: Buffer,
-	config: EmbedConfig
+	config: EmbedConfig,
+	instruction?: string
 ): Promise<number[]> {
 	const url = `${config.baseUrl.replace(TRAILING_SLASH, "")}/v1/embeddings`;
 	const base64 = videoBuffer.toString("base64");
@@ -37,7 +41,12 @@ export async function embedVideo(
 			messages: [
 				{
 					role: "system",
-					content: [{ type: "text", text: "Represent the visual content." }],
+					content: [
+						{
+							type: "text",
+							text: instruction || DEFAULT_VIDEO_INSTRUCTION,
+						},
+					],
 				},
 				{
 					role: "user",
@@ -70,7 +79,8 @@ export async function embedVideo(
 
 export async function embedText(
 	text: string,
-	config: EmbedConfig
+	config: EmbedConfig,
+	instruction?: string
 ): Promise<number[]> {
 	const url = `${config.baseUrl.replace(TRAILING_SLASH, "")}/v1/embeddings`;
 	const response = await fetch(url, {
@@ -84,7 +94,12 @@ export async function embedText(
 			messages: [
 				{
 					role: "system",
-					content: [{ type: "text", text: "Represent the user's input." }],
+					content: [
+						{
+							type: "text",
+							text: instruction || DEFAULT_TEXT_INSTRUCTION,
+						},
+					],
 				},
 				{
 					role: "user",

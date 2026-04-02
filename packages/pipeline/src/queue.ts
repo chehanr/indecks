@@ -1,6 +1,8 @@
 import type { createDb } from "@indecks/db";
 import { job as jobTable } from "@indecks/db/schema/job";
+import { library as libraryTable } from "@indecks/db/schema/library";
 import { settings as settingsTable } from "@indecks/db/schema/settings";
+import { video as videoTable } from "@indecks/db/schema/video";
 import type { VectorDb } from "@indecks/vector";
 import { and, eq } from "drizzle-orm";
 
@@ -132,7 +134,39 @@ async function processJob(
 			if (!embedConfig) {
 				throw new Error("Embedding API not configured");
 			}
-			await processVideo(db, vectorDb, jobRow.videoId, embedConfig, onProgress);
+			let videoInstruction: string | undefined;
+			if (jobRow.libraryId) {
+				const lib = await db
+					.select({ embeddingInstruction: libraryTable.embeddingInstruction })
+					.from(libraryTable)
+					.where(eq(libraryTable.id, jobRow.libraryId))
+					.get();
+				videoInstruction = lib?.embeddingInstruction ?? undefined;
+			} else {
+				const vid = await db
+					.select({ libraryId: videoTable.libraryId })
+					.from(videoTable)
+					.where(eq(videoTable.id, jobRow.videoId))
+					.get();
+				if (vid?.libraryId) {
+					const lib = await db
+						.select({
+							embeddingInstruction: libraryTable.embeddingInstruction,
+						})
+						.from(libraryTable)
+						.where(eq(libraryTable.id, vid.libraryId))
+						.get();
+					videoInstruction = lib?.embeddingInstruction ?? undefined;
+				}
+			}
+			await processVideo(
+				db,
+				vectorDb,
+				jobRow.videoId,
+				embedConfig,
+				onProgress,
+				videoInstruction
+			);
 			break;
 		}
 		case "index_library": {

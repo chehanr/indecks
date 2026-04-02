@@ -99,7 +99,8 @@ export async function processVideo(
 	vectorDb: VectorDb,
 	videoId: string,
 	embedConfig: EmbedConfig,
-	onProgress?: ProgressCallback
+	onProgress?: ProgressCallback,
+	instruction?: string
 ): Promise<void> {
 	const vid = await db
 		.select()
@@ -156,7 +157,11 @@ export async function processVideo(
 				const videoFile = Bun.file(downscaledPath);
 				const videoBuffer = Buffer.from(await videoFile.arrayBuffer());
 
-				const embedding = await embedVideo(videoBuffer, embedConfig);
+				const embedding = await embedVideo(
+					videoBuffer,
+					embedConfig,
+					instruction
+				);
 				vectorDb.upsert(chunkId, new Float32Array(embedding));
 
 				await db
@@ -205,6 +210,18 @@ export async function indexLibrary(
 	embedConfig: EmbedConfig,
 	onProgress?: ProgressCallback
 ): Promise<void> {
+	const lib = await db
+		.select()
+		.from(libraryTable)
+		.where(eq(libraryTable.id, libraryId))
+		.get();
+
+	if (!lib) {
+		throw new Error(`Library ${libraryId} not found`);
+	}
+
+	const instruction = lib.embeddingInstruction ?? undefined;
+
 	await db
 		.update(libraryTable)
 		.set({ status: "scanning" })
@@ -227,15 +244,22 @@ export async function indexLibrary(
 	let processed = 0;
 
 	for (const vid of pendingVideos) {
-		await processVideo(db, vectorDb, vid.id, embedConfig, async (pct, msg) => {
-			const overallPct = Math.round(
-				((processed + pct / 100) / pendingVideos.length) * 100
-			);
-			await onProgress?.(
-				overallPct,
-				`Video ${processed + 1}/${pendingVideos.length}: ${msg}`
-			);
-		});
+		await processVideo(
+			db,
+			vectorDb,
+			vid.id,
+			embedConfig,
+			async (pct, msg) => {
+				const overallPct = Math.round(
+					((processed + pct / 100) / pendingVideos.length) * 100
+				);
+				await onProgress?.(
+					overallPct,
+					`Video ${processed + 1}/${pendingVideos.length}: ${msg}`
+				);
+			},
+			instruction
+		);
 		processed++;
 	}
 
