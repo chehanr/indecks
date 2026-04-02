@@ -196,6 +196,9 @@ function LibraryDetailPage() {
 			embeddingApiKey?: string;
 			embeddingModel?: string;
 			embeddingDimensions?: number;
+			chunkDuration?: number;
+			chunkOverlap?: number;
+			downscaleFps?: number;
 		}) => trpcClient.library.update.mutate(input),
 		onSuccess: () => {
 			toast.success("Library updated");
@@ -230,6 +233,9 @@ function LibraryDetailPage() {
 	const [apiKey, setApiKey] = useState("");
 	const [model, setModel] = useState("");
 	const [dimensions, setDimensions] = useState(768);
+	const [chunkDuration, setChunkDuration] = useState(30);
+	const [chunkOverlap, setChunkOverlap] = useState(5);
+	const [downscaleFps, setDownscaleFps] = useState(5);
 
 	const library = libraryQuery.data;
 
@@ -240,6 +246,9 @@ function LibraryDetailPage() {
 			setApiKey(library.embeddingApiKey ?? "");
 			setModel(library.embeddingModel ?? "");
 			setDimensions(library.embeddingDimensions ?? 768);
+			setChunkDuration(library.chunkDuration);
+			setChunkOverlap(library.chunkOverlap);
+			setDownscaleFps(library.downscaleFps);
 		}
 	}, [library]);
 
@@ -269,7 +278,10 @@ function LibraryDetailPage() {
 		baseUrl !== (library.embeddingBaseUrl ?? "") ||
 		apiKey !== (library.embeddingApiKey ?? "") ||
 		model !== (library.embeddingModel ?? "") ||
-		dimensions !== (library.embeddingDimensions ?? 768);
+		dimensions !== (library.embeddingDimensions ?? 768) ||
+		chunkDuration !== library.chunkDuration ||
+		chunkOverlap !== library.chunkOverlap ||
+		downscaleFps !== library.downscaleFps;
 
 	return (
 		<div className="container mx-auto max-w-3xl space-y-6 px-4 py-6">
@@ -354,6 +366,52 @@ function LibraryDetailPage() {
 								search. Leave blank for default.
 							</p>
 						</div>
+
+						<hr />
+
+						<div className="flex flex-col gap-2">
+							<Label htmlFor="chunkDuration">Chunk Duration (seconds)</Label>
+							<Input
+								id="chunkDuration"
+								min={1}
+								onChange={(e) =>
+									setChunkDuration(Number.parseInt(e.target.value, 10) || 30)
+								}
+								type="number"
+								value={chunkDuration}
+							/>
+						</div>
+						<div className="flex flex-col gap-2">
+							<Label htmlFor="chunkOverlap">Chunk Overlap (seconds)</Label>
+							<Input
+								id="chunkOverlap"
+								min={0}
+								onChange={(e) =>
+									setChunkOverlap(Number.parseInt(e.target.value, 10) || 0)
+								}
+								type="number"
+								value={chunkOverlap}
+							/>
+							<p className="text-muted-foreground text-xs">
+								Overlap between consecutive chunks. Helps avoid missing content
+								at boundaries.
+							</p>
+						</div>
+						<div className="flex flex-col gap-2">
+							<Label htmlFor="downscaleFps">Downscale FPS</Label>
+							<Input
+								id="downscaleFps"
+								min={1}
+								onChange={(e) =>
+									setDownscaleFps(Number.parseInt(e.target.value, 10) || 5)
+								}
+								type="number"
+								value={downscaleFps}
+							/>
+							<p className="text-muted-foreground text-xs">
+								Frame rate for downscaled chunks before embedding.
+							</p>
+						</div>
 						<div className="flex gap-2">
 							<Button
 								disabled={updateMutation.isPending || !hasConfigChanged}
@@ -365,6 +423,9 @@ function LibraryDetailPage() {
 										embeddingApiKey: apiKey,
 										embeddingModel: model || undefined,
 										embeddingDimensions: dimensions,
+										chunkDuration,
+										chunkOverlap,
+										downscaleFps,
 									})
 								}
 								size="sm"

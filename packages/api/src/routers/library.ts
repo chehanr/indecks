@@ -39,6 +39,9 @@ export const libraryRouter = router({
 				embeddingApiKey: z.string().trim().optional(),
 				embeddingModel: z.string().trim().min(1),
 				embeddingDimensions: z.number().min(1),
+				chunkDuration: z.number().min(1).default(30),
+				chunkOverlap: z.number().min(0).default(5),
+				downscaleFps: z.number().min(1).default(5),
 			})
 		)
 		.mutation(async ({ ctx, input }) => {
@@ -56,6 +59,9 @@ export const libraryRouter = router({
 				embeddingApiKey: input.embeddingApiKey || null,
 				embeddingModel: input.embeddingModel,
 				embeddingDimensions: input.embeddingDimensions,
+				chunkDuration: input.chunkDuration,
+				chunkOverlap: input.chunkOverlap,
+				downscaleFps: input.downscaleFps,
 			});
 
 			return { id };
@@ -70,6 +76,9 @@ export const libraryRouter = router({
 				embeddingApiKey: z.string().trim().optional(),
 				embeddingModel: z.string().trim().min(1).optional(),
 				embeddingDimensions: z.number().min(1).optional(),
+				chunkDuration: z.number().min(1).optional(),
+				chunkOverlap: z.number().min(0).optional(),
+				downscaleFps: z.number().min(1).optional(),
 			})
 		)
 		.mutation(async ({ ctx, input }) => {
@@ -90,6 +99,15 @@ export const libraryRouter = router({
 			}
 			if (fields.embeddingDimensions !== undefined) {
 				set.embeddingDimensions = fields.embeddingDimensions;
+			}
+			if (fields.chunkDuration !== undefined) {
+				set.chunkDuration = fields.chunkDuration;
+			}
+			if (fields.chunkOverlap !== undefined) {
+				set.chunkOverlap = fields.chunkOverlap;
+			}
+			if (fields.downscaleFps !== undefined) {
+				set.downscaleFps = fields.downscaleFps;
 			}
 
 			await ctx.db.update(libraryTable).set(set).where(eq(libraryTable.id, id));

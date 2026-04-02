@@ -34,6 +34,9 @@ function CreateLibraryForm() {
 	const [embeddingApiKey, setEmbeddingApiKey] = useState("");
 	const [embeddingModel, setEmbeddingModel] = useState("");
 	const [embeddingDimensions, setEmbeddingDimensions] = useState(768);
+	const [chunkDuration, setChunkDuration] = useState(30);
+	const [chunkOverlap, setChunkOverlap] = useState(5);
+	const [downscaleFps, setDownscaleFps] = useState(5);
 
 	const createMutation = useMutation({
 		mutationFn: (input: {
@@ -44,6 +47,9 @@ function CreateLibraryForm() {
 			embeddingApiKey?: string;
 			embeddingModel: string;
 			embeddingDimensions: number;
+			chunkDuration: number;
+			chunkOverlap: number;
+			downscaleFps: number;
 		}) => trpcClient.library.create.mutate(input),
 		onSuccess: () => {
 			toast.success("Library created");
@@ -54,6 +60,9 @@ function CreateLibraryForm() {
 			setEmbeddingApiKey("");
 			setEmbeddingModel("");
 			setEmbeddingDimensions(768);
+			setChunkDuration(30);
+			setChunkOverlap(5);
+			setDownscaleFps(5);
 			queryClient.invalidateQueries({ queryKey: [["library", "list"]] });
 		},
 		onError: (err) => {
@@ -105,6 +114,9 @@ function CreateLibraryForm() {
 							embeddingApiKey: embeddingApiKey || undefined,
 							embeddingModel,
 							embeddingDimensions,
+							chunkDuration,
+							chunkOverlap,
+							downscaleFps,
 						});
 					}}
 				>
@@ -184,6 +196,52 @@ function CreateLibraryForm() {
 						<p className="text-muted-foreground text-xs">
 							System prompt sent to the embedding model. Leave blank for
 							default.
+						</p>
+					</div>
+
+					<hr />
+
+					<div className="flex flex-col gap-2">
+						<Label htmlFor="chunkDuration">Chunk Duration (seconds)</Label>
+						<Input
+							id="chunkDuration"
+							min={1}
+							onChange={(e) =>
+								setChunkDuration(Number.parseInt(e.target.value, 10) || 30)
+							}
+							type="number"
+							value={chunkDuration}
+						/>
+					</div>
+					<div className="flex flex-col gap-2">
+						<Label htmlFor="chunkOverlap">Chunk Overlap (seconds)</Label>
+						<Input
+							id="chunkOverlap"
+							min={0}
+							onChange={(e) =>
+								setChunkOverlap(Number.parseInt(e.target.value, 10) || 0)
+							}
+							type="number"
+							value={chunkOverlap}
+						/>
+						<p className="text-muted-foreground text-xs">
+							Overlap between consecutive chunks. Helps avoid missing content at
+							boundaries.
+						</p>
+					</div>
+					<div className="flex flex-col gap-2">
+						<Label htmlFor="downscaleFps">Downscale FPS</Label>
+						<Input
+							id="downscaleFps"
+							min={1}
+							onChange={(e) =>
+								setDownscaleFps(Number.parseInt(e.target.value, 10) || 5)
+							}
+							type="number"
+							value={downscaleFps}
+						/>
+						<p className="text-muted-foreground text-xs">
+							Frame rate for downscaled chunks before embedding.
 						</p>
 					</div>
 					<div className="flex gap-2">

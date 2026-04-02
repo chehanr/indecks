@@ -100,7 +100,9 @@ export async function processVideo(
 	videoId: string,
 	embedConfig: EmbedConfig,
 	onProgress?: ProgressCallback,
-	instruction?: string
+	instruction?: string,
+	chunkOptions?: { chunkDuration?: number; overlap?: number },
+	downscaleFps?: number
 ): Promise<void> {
 	const vid = await db
 		.select()
@@ -119,7 +121,7 @@ export async function processVideo(
 
 	try {
 		await onProgress?.(0, `Chunking ${vid.fileName}...`);
-		const chunks = await chunkVideo(vid.filePath);
+		const chunks = await chunkVideo(vid.filePath, chunkOptions);
 
 		const totalChunks = chunks.length;
 		let processed = 0;
@@ -153,7 +155,9 @@ export async function processVideo(
 
 			let downscaledPath: string | null = null;
 			try {
-				downscaledPath = await downscaleChunk(chunkInfo.chunkPath);
+				downscaledPath = await downscaleChunk(chunkInfo.chunkPath, {
+					fps: downscaleFps,
+				});
 				const videoFile = Bun.file(downscaledPath);
 				const videoBuffer = Buffer.from(await videoFile.arrayBuffer());
 
@@ -221,6 +225,10 @@ export async function indexLibrary(
 	}
 
 	const instruction = lib.embeddingInstruction ?? undefined;
+	const chunkOpts = {
+		chunkDuration: lib.chunkDuration,
+		overlap: lib.chunkOverlap,
+	};
 
 	await db
 		.update(libraryTable)
@@ -258,7 +266,9 @@ export async function indexLibrary(
 					`Video ${processed + 1}/${pendingVideos.length}: ${msg}`
 				);
 			},
-			instruction
+			instruction,
+			chunkOpts,
+			lib.downscaleFps
 		);
 		processed++;
 	}

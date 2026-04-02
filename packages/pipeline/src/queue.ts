@@ -155,7 +155,12 @@ async function processJob(
 			}
 			const vectorDb = vectorDbManager.get(libraryId, embedConfig.dimensions);
 			const lib = await db
-				.select({ embeddingInstruction: libraryTable.embeddingInstruction })
+				.select({
+					embeddingInstruction: libraryTable.embeddingInstruction,
+					chunkDuration: libraryTable.chunkDuration,
+					chunkOverlap: libraryTable.chunkOverlap,
+					downscaleFps: libraryTable.downscaleFps,
+				})
 				.from(libraryTable)
 				.where(eq(libraryTable.id, libraryId))
 				.get();
@@ -165,7 +170,12 @@ async function processJob(
 				jobRow.videoId,
 				embedConfig,
 				onProgress,
-				lib?.embeddingInstruction ?? undefined
+				lib?.embeddingInstruction ?? undefined,
+				{
+					chunkDuration: lib?.chunkDuration ?? 30,
+					overlap: lib?.chunkOverlap ?? 5,
+				},
+				lib?.downscaleFps ?? 5
 			);
 			break;
 		}
@@ -214,24 +224,30 @@ export function startWorker(
 ): { stop: () => void } {
 	let running = true;
 
+	const runJob = async (
+		jobRow: typeof jobTable.$inferSelect
+	): Promise<void> => {
+		try {
+			await processJob(db, vectorDbManager, jobRow);
+			await completeJob(db, jobRow.id);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			await failJob(db, jobRow.id, msg);
+			if (jobRow.libraryId) {
+				await db
+					.update(libraryTable)
+					.set({ status: "error" })
+					.where(eq(libraryTable.id, jobRow.libraryId));
+			}
+		}
+	};
+
 	const poll = async () => {
 		while (running) {
 			try {
 				const jobRow = await claimNextJob(db);
 				if (jobRow) {
-					try {
-						await processJob(db, vectorDbManager, jobRow);
-						await completeJob(db, jobRow.id);
-					} catch (err) {
-						const msg = err instanceof Error ? err.message : String(err);
-						await failJob(db, jobRow.id, msg);
-						if (jobRow.libraryId) {
-							await db
-								.update(libraryTable)
-								.set({ status: "error" })
-								.where(eq(libraryTable.id, jobRow.libraryId));
-						}
-					}
+					await runJob(jobRow);
 				}
 			} catch {
 				// ignore polling errors

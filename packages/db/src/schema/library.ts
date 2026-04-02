@@ -19,6 +19,9 @@ export const library = sqliteTable(
 		embeddingApiKey: text("embedding_api_key"),
 		embeddingModel: text("embedding_model"),
 		embeddingDimensions: integer("embedding_dimensions"),
+		chunkDuration: integer("chunk_duration").default(30).notNull(),
+		chunkOverlap: integer("chunk_overlap").default(5).notNull(),
+		downscaleFps: integer("downscale_fps").default(5).notNull(),
 		videoCount: integer("video_count").default(0).notNull(),
 		createdAt: integer("created_at", { mode: "timestamp_ms" })
 			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
