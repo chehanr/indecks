@@ -15,6 +15,20 @@
       "when": 1775134403791,
       "tag": "0001_loving_jocasta",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1775138511885,
+      "tag": "0002_thick_stardust",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1775138756739,
+      "tag": "0003_spicy_omega_flight",
+      "breakpoints": true
     }
   ]
 }

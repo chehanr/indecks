@@ -27,7 +27,7 @@ export async function embedVideo(
 	config: EmbedConfig,
 	instruction?: string
 ): Promise<number[]> {
-	const url = `${config.baseUrl.replace(TRAILING_SLASH, "")}/v1/embeddings`;
+	const url = `${config.baseUrl.replace(TRAILING_SLASH, "")}/embeddings`;
 	const base64 = videoBuffer.toString("base64");
 
 	const response = await fetch(url, {
@@ -82,7 +82,7 @@ export async function embedText(
 	config: EmbedConfig,
 	instruction?: string
 ): Promise<number[]> {
-	const url = `${config.baseUrl.replace(TRAILING_SLASH, "")}/v1/embeddings`;
+	const url = `${config.baseUrl.replace(TRAILING_SLASH, "")}/embeddings`;
 	const response = await fetch(url, {
 		method: "POST",
 		headers: {

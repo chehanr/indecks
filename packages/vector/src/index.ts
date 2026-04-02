@@ -1,4 +1,6 @@
 import { Database } from "bun:sqlite";
+import { unlink } from "node:fs/promises";
+import { resolve } from "node:path";
 import { getLoadablePath } from "sqlite-vec";
 
 const SQLITE_LIB_PATHS = [
@@ -108,5 +110,55 @@ export class VectorDb {
 
 	getDimensions(): number {
 		return this.dimensions;
+	}
+}
+
+export class VectorDbManager {
+	private readonly dir: string;
+	private readonly cache: Map<string, VectorDb> = new Map();
+
+	constructor(dir: string) {
+		this.dir = dir;
+	}
+
+	get(libraryId: string, dimensions: number): VectorDb {
+		const existing = this.cache.get(libraryId);
+		if (existing) {
+			if (existing.getDimensions() !== dimensions) {
+				throw new Error(
+					`VectorDb for library ${libraryId} has ${existing.getDimensions()} dimensions, but ${dimensions} requested`
+				);
+			}
+			return existing;
+		}
+		const dbPath = resolve(this.dir, `vector-${libraryId}.db`);
+		const vdb = new VectorDb(dbPath, dimensions);
+		this.cache.set(libraryId, vdb);
+		return vdb;
+	}
+
+	async remove(libraryId: string): Promise<void> {
+		const existing = this.cache.get(libraryId);
+		if (existing) {
+			existing.close();
+			this.cache.delete(libraryId);
+		}
+		const dbPath = resolve(this.dir, `vector-${libraryId}.db`);
+		await unlink(dbPath).catch(() => {
+			// file may not exist
+		});
+		await unlink(`${dbPath}-wal`).catch(() => {
+			// file may not exist
+		});
+		await unlink(`${dbPath}-shm`).catch(() => {
+			// file may not exist
+		});
+	}
+
+	closeAll(): void {
+		for (const vdb of this.cache.values()) {
+			vdb.close();
+		}
+		this.cache.clear();
 	}
 }

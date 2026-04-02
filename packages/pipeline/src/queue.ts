@@ -1,9 +1,8 @@
 import type { createDb } from "@indecks/db";
 import { job as jobTable } from "@indecks/db/schema/job";
 import { library as libraryTable } from "@indecks/db/schema/library";
-import { settings as settingsTable } from "@indecks/db/schema/settings";
 import { video as videoTable } from "@indecks/db/schema/video";
-import type { VectorDb } from "@indecks/vector";
+import type { VectorDbManager } from "@indecks/vector";
 import { and, eq } from "drizzle-orm";
 
 import type { EmbedConfig } from "./embedder";
@@ -11,33 +10,32 @@ import { indexLibrary, processVideo, scanLibraryFolder } from "./processor";
 
 type Db = ReturnType<typeof createDb>;
 
-async function getEmbedConfig(db: Db): Promise<EmbedConfig | null> {
-	const row = await db
-		.select()
-		.from(settingsTable)
-		.where(eq(settingsTable.id, "default"))
+async function getLibraryEmbedConfig(
+	db: Db,
+	libraryId: string
+): Promise<EmbedConfig | null> {
+	const lib = await db
+		.select({
+			embeddingBaseUrl: libraryTable.embeddingBaseUrl,
+			embeddingApiKey: libraryTable.embeddingApiKey,
+			embeddingModel: libraryTable.embeddingModel,
+			embeddingDimensions: libraryTable.embeddingDimensions,
+		})
+		.from(libraryTable)
+		.where(eq(libraryTable.id, libraryId))
 		.get();
 
-	if (!(row?.embeddingBaseUrl && row.embeddingModel)) {
-		const baseUrl = process.env.EMBEDDING_API_BASE_URL;
-		const model = process.env.EMBEDDING_MODEL;
-		if (!(baseUrl && model)) {
-			return null;
-		}
-
-		return {
-			baseUrl,
-			apiKey: process.env.EMBEDDING_API_KEY ?? "",
-			model,
-			dimensions: row?.embeddingDimensions ?? 768,
-		};
+	if (
+		!(lib?.embeddingBaseUrl && lib.embeddingModel && lib.embeddingDimensions)
+	) {
+		return null;
 	}
 
 	return {
-		baseUrl: row.embeddingBaseUrl,
-		apiKey: row.embeddingApiKey ?? "",
-		model: row.embeddingModel,
-		dimensions: row.embeddingDimensions,
+		baseUrl: lib.embeddingBaseUrl,
+		apiKey: lib.embeddingApiKey ?? "",
+		model: lib.embeddingModel,
+		dimensions: lib.embeddingDimensions,
 	};
 }
 
@@ -108,16 +106,32 @@ async function failJob(db: Db, jobId: string, error: string): Promise<void> {
 		.where(eq(jobTable.id, jobId));
 }
 
+async function resolveLibraryId(
+	db: Db,
+	jobRow: typeof jobTable.$inferSelect
+): Promise<string | null> {
+	if (jobRow.libraryId) {
+		return jobRow.libraryId;
+	}
+	if (jobRow.videoId) {
+		const vid = await db
+			.select({ libraryId: videoTable.libraryId })
+			.from(videoTable)
+			.where(eq(videoTable.id, jobRow.videoId))
+			.get();
+		return vid?.libraryId ?? null;
+	}
+	return null;
+}
+
 async function processJob(
 	db: Db,
-	vectorDb: VectorDb,
+	vectorDbManager: VectorDbManager,
 	jobRow: typeof jobTable.$inferSelect
 ): Promise<void> {
 	const onProgress = async (progress: number, message: string) => {
 		await updateJobProgress(db, jobRow.id, progress, message);
 	};
-
-	const embedConfig = await getEmbedConfig(db);
 
 	switch (jobRow.type) {
 		case "scan_library": {
@@ -131,41 +145,27 @@ async function processJob(
 			if (!jobRow.videoId) {
 				throw new Error("index_video job missing videoId");
 			}
+			const libraryId = await resolveLibraryId(db, jobRow);
+			if (!libraryId) {
+				throw new Error("Could not resolve libraryId for index_video job");
+			}
+			const embedConfig = await getLibraryEmbedConfig(db, libraryId);
 			if (!embedConfig) {
-				throw new Error("Embedding API not configured");
+				throw new Error("Library embedding not configured");
 			}
-			let videoInstruction: string | undefined;
-			if (jobRow.libraryId) {
-				const lib = await db
-					.select({ embeddingInstruction: libraryTable.embeddingInstruction })
-					.from(libraryTable)
-					.where(eq(libraryTable.id, jobRow.libraryId))
-					.get();
-				videoInstruction = lib?.embeddingInstruction ?? undefined;
-			} else {
-				const vid = await db
-					.select({ libraryId: videoTable.libraryId })
-					.from(videoTable)
-					.where(eq(videoTable.id, jobRow.videoId))
-					.get();
-				if (vid?.libraryId) {
-					const lib = await db
-						.select({
-							embeddingInstruction: libraryTable.embeddingInstruction,
-						})
-						.from(libraryTable)
-						.where(eq(libraryTable.id, vid.libraryId))
-						.get();
-					videoInstruction = lib?.embeddingInstruction ?? undefined;
-				}
-			}
+			const vectorDb = vectorDbManager.get(libraryId, embedConfig.dimensions);
+			const lib = await db
+				.select({ embeddingInstruction: libraryTable.embeddingInstruction })
+				.from(libraryTable)
+				.where(eq(libraryTable.id, libraryId))
+				.get();
 			await processVideo(
 				db,
 				vectorDb,
 				jobRow.videoId,
 				embedConfig,
 				onProgress,
-				videoInstruction
+				lib?.embeddingInstruction ?? undefined
 			);
 			break;
 		}
@@ -173,9 +173,14 @@ async function processJob(
 			if (!jobRow.libraryId) {
 				throw new Error("index_library job missing libraryId");
 			}
+			const embedConfig = await getLibraryEmbedConfig(db, jobRow.libraryId);
 			if (!embedConfig) {
-				throw new Error("Embedding API not configured");
+				throw new Error("Library embedding not configured");
 			}
+			const vectorDb = vectorDbManager.get(
+				jobRow.libraryId,
+				embedConfig.dimensions
+			);
 			await indexLibrary(
 				db,
 				vectorDb,
@@ -204,7 +209,7 @@ export async function recoverStaleJobs(db: Db): Promise<number> {
 
 export function startWorker(
 	db: Db,
-	vectorDb: VectorDb,
+	vectorDbManager: VectorDbManager,
 	pollInterval = 3000
 ): { stop: () => void } {
 	let running = true;
@@ -215,11 +220,17 @@ export function startWorker(
 				const jobRow = await claimNextJob(db);
 				if (jobRow) {
 					try {
-						await processJob(db, vectorDb, jobRow);
+						await processJob(db, vectorDbManager, jobRow);
 						await completeJob(db, jobRow.id);
 					} catch (err) {
 						const msg = err instanceof Error ? err.message : String(err);
 						await failJob(db, jobRow.id, msg);
+						if (jobRow.libraryId) {
+							await db
+								.update(libraryTable)
+								.set({ status: "error" })
+								.where(eq(libraryTable.id, jobRow.libraryId));
+						}
 					}
 				}
 			} catch {

@@ -30,24 +30,59 @@ function CreateLibraryForm() {
 	const [name, setName] = useState("");
 	const [folderPath, setFolderPath] = useState("");
 	const [embeddingInstruction, setEmbeddingInstruction] = useState("");
+	const [embeddingBaseUrl, setEmbeddingBaseUrl] = useState("");
+	const [embeddingApiKey, setEmbeddingApiKey] = useState("");
+	const [embeddingModel, setEmbeddingModel] = useState("");
+	const [embeddingDimensions, setEmbeddingDimensions] = useState(768);
 
 	const createMutation = useMutation({
 		mutationFn: (input: {
 			name: string;
 			folderPath: string;
 			embeddingInstruction?: string;
+			embeddingBaseUrl: string;
+			embeddingApiKey?: string;
+			embeddingModel: string;
+			embeddingDimensions: number;
 		}) => trpcClient.library.create.mutate(input),
 		onSuccess: () => {
 			toast.success("Library created");
 			setName("");
 			setFolderPath("");
 			setEmbeddingInstruction("");
+			setEmbeddingBaseUrl("");
+			setEmbeddingApiKey("");
+			setEmbeddingModel("");
+			setEmbeddingDimensions(768);
 			queryClient.invalidateQueries({ queryKey: [["library", "list"]] });
 		},
 		onError: (err) => {
 			toast.error(err.message);
 		},
 	});
+
+	const testMutation = useMutation({
+		mutationFn: () =>
+			trpcClient.library.testEmbedding.mutate({
+				embeddingBaseUrl,
+				embeddingApiKey,
+				embeddingModel,
+				embeddingDimensions,
+			}),
+		onSuccess: (data) => {
+			if (data.ok) {
+				toast.success("Connection successful");
+			} else {
+				toast.error(data.error ?? "Connection failed");
+			}
+		},
+		onError: (err) => {
+			toast.error(err.message);
+		},
+	});
+
+	const canSubmit =
+		name && folderPath && embeddingBaseUrl.trim() && embeddingModel.trim();
 
 	return (
 		<Card>
@@ -66,6 +101,10 @@ function CreateLibraryForm() {
 							name,
 							folderPath,
 							embeddingInstruction: embeddingInstruction || undefined,
+							embeddingBaseUrl,
+							embeddingApiKey: embeddingApiKey || undefined,
+							embeddingModel,
+							embeddingDimensions,
 						});
 					}}
 				>
@@ -87,6 +126,51 @@ function CreateLibraryForm() {
 							value={folderPath}
 						/>
 					</div>
+
+					<hr />
+
+					<div className="flex flex-col gap-2">
+						<Label htmlFor="embeddingBaseUrl">Embedding Base URL</Label>
+						<Input
+							id="embeddingBaseUrl"
+							onChange={(e) => setEmbeddingBaseUrl(e.target.value)}
+							placeholder="http://localhost:8000/v1"
+							value={embeddingBaseUrl}
+						/>
+					</div>
+					<div className="flex flex-col gap-2">
+						<Label htmlFor="embeddingApiKey">Embedding API Key</Label>
+						<Input
+							id="embeddingApiKey"
+							onChange={(e) => setEmbeddingApiKey(e.target.value)}
+							placeholder="Optional"
+							type="password"
+							value={embeddingApiKey}
+						/>
+					</div>
+					<div className="flex flex-col gap-2">
+						<Label htmlFor="embeddingModel">Embedding Model</Label>
+						<Input
+							id="embeddingModel"
+							onChange={(e) => setEmbeddingModel(e.target.value)}
+							placeholder="Qwen/Qwen3-Embedding-0.6B"
+							value={embeddingModel}
+						/>
+					</div>
+					<div className="flex flex-col gap-2">
+						<Label htmlFor="embeddingDimensions">Embedding Dimensions</Label>
+						<Input
+							id="embeddingDimensions"
+							min={1}
+							onChange={(e) =>
+								setEmbeddingDimensions(
+									Number.parseInt(e.target.value, 10) || 768
+								)
+							}
+							type="number"
+							value={embeddingDimensions}
+						/>
+					</div>
 					<div className="flex flex-col gap-2">
 						<Label htmlFor="embeddingInstruction">
 							Embedding Instruction (optional)
@@ -102,12 +186,25 @@ function CreateLibraryForm() {
 							default.
 						</p>
 					</div>
-					<Button
-						disabled={createMutation.isPending || !name || !folderPath}
-						type="submit"
-					>
-						{createMutation.isPending ? "Creating..." : "Create"}
-					</Button>
+					<div className="flex gap-2">
+						<Button
+							disabled={!canSubmit || createMutation.isPending}
+							type="submit"
+						>
+							{createMutation.isPending ? "Creating..." : "Create"}
+						</Button>
+						<Button
+							disabled={
+								!(embeddingBaseUrl.trim() && embeddingModel.trim()) ||
+								testMutation.isPending
+							}
+							onClick={() => testMutation.mutate()}
+							type="button"
+							variant="outline"
+						>
+							{testMutation.isPending ? "Testing..." : "Test Connection"}
+						</Button>
+					</div>
 				</form>
 			</CardContent>
 		</Card>

@@ -3,6 +3,7 @@ import { chunk as chunkTable } from "@indecks/db/schema/chunk";
 import { job as jobTable } from "@indecks/db/schema/job";
 import { library as libraryTable } from "@indecks/db/schema/library";
 import { video as videoTable } from "@indecks/db/schema/video";
+import { testConnection } from "@indecks/pipeline/embedder";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -34,6 +35,10 @@ export const libraryRouter = router({
 				name: z.string().min(1),
 				folderPath: z.string().min(1),
 				embeddingInstruction: z.string().trim().optional(),
+				embeddingBaseUrl: z.string().trim().min(1),
+				embeddingApiKey: z.string().trim().optional(),
+				embeddingModel: z.string().trim().min(1),
+				embeddingDimensions: z.number().min(1),
 			})
 		)
 		.mutation(async ({ ctx, input }) => {
@@ -47,6 +52,10 @@ export const libraryRouter = router({
 				name: input.name,
 				folderPath: input.folderPath,
 				embeddingInstruction: input.embeddingInstruction || null,
+				embeddingBaseUrl: input.embeddingBaseUrl,
+				embeddingApiKey: input.embeddingApiKey || null,
+				embeddingModel: input.embeddingModel,
+				embeddingDimensions: input.embeddingDimensions,
 			});
 
 			return { id };
@@ -57,15 +66,33 @@ export const libraryRouter = router({
 			z.object({
 				id: z.string(),
 				embeddingInstruction: z.string().trim().optional(),
+				embeddingBaseUrl: z.string().trim().min(1).optional(),
+				embeddingApiKey: z.string().trim().optional(),
+				embeddingModel: z.string().trim().min(1).optional(),
+				embeddingDimensions: z.number().min(1).optional(),
 			})
 		)
 		.mutation(async ({ ctx, input }) => {
-			await ctx.db
-				.update(libraryTable)
-				.set({
-					embeddingInstruction: input.embeddingInstruction || null,
-				})
-				.where(eq(libraryTable.id, input.id));
+			const { id, ...fields } = input;
+			const set: Record<string, unknown> = {};
+
+			if (fields.embeddingInstruction !== undefined) {
+				set.embeddingInstruction = fields.embeddingInstruction || null;
+			}
+			if (fields.embeddingBaseUrl !== undefined) {
+				set.embeddingBaseUrl = fields.embeddingBaseUrl;
+			}
+			if (fields.embeddingApiKey !== undefined) {
+				set.embeddingApiKey = fields.embeddingApiKey || null;
+			}
+			if (fields.embeddingModel !== undefined) {
+				set.embeddingModel = fields.embeddingModel;
+			}
+			if (fields.embeddingDimensions !== undefined) {
+				set.embeddingDimensions = fields.embeddingDimensions;
+			}
+
+			await ctx.db.update(libraryTable).set(set).where(eq(libraryTable.id, id));
 
 			return { success: true };
 		}),
@@ -73,18 +100,7 @@ export const libraryRouter = router({
 	delete: protectedProcedure
 		.input(z.object({ id: z.string() }))
 		.mutation(async ({ ctx, input }) => {
-			const chunks = await ctx.db
-				.select({ id: chunkTable.id })
-				.from(chunkTable)
-				.innerJoin(videoTable, eq(chunkTable.videoId, videoTable.id))
-				.where(eq(videoTable.libraryId, input.id))
-				.all();
-
-			const chunkIds = chunks.map((c) => c.id);
-			if (chunkIds.length > 0) {
-				ctx.vectorDb.removeByChunkIds(chunkIds);
-			}
-
+			await ctx.vectorDbManager.remove(input.id);
 			await ctx.db.delete(libraryTable).where(eq(libraryTable.id, input.id));
 
 			return { success: true };
@@ -101,6 +117,12 @@ export const libraryRouter = router({
 
 			if (!lib) {
 				throw new Error("Library not found");
+			}
+
+			if (
+				!(lib.embeddingBaseUrl && lib.embeddingModel && lib.embeddingDimensions)
+			) {
+				throw new Error("Library embedding not configured");
 			}
 
 			const jobId = nanoid();
@@ -127,6 +149,16 @@ export const libraryRouter = router({
 				throw new Error("Video not found");
 			}
 
+			const lib = await ctx.db
+				.select()
+				.from(libraryTable)
+				.where(eq(libraryTable.id, vid.libraryId))
+				.get();
+
+			if (!lib?.embeddingDimensions) {
+				throw new Error("Library embedding not configured");
+			}
+
 			const chunks = await ctx.db
 				.select({ id: chunkTable.id })
 				.from(chunkTable)
@@ -135,7 +167,11 @@ export const libraryRouter = router({
 
 			const chunkIds = chunks.map((c) => c.id);
 			if (chunkIds.length > 0) {
-				ctx.vectorDb.removeByChunkIds(chunkIds);
+				const vectorDb = ctx.vectorDbManager.get(
+					vid.libraryId,
+					lib.embeddingDimensions
+				);
+				vectorDb.removeByChunkIds(chunkIds);
 				await ctx.db
 					.delete(chunkTable)
 					.where(eq(chunkTable.videoId, input.videoId));
@@ -166,5 +202,23 @@ export const libraryRouter = router({
 				.from(videoTable)
 				.where(eq(videoTable.libraryId, input.libraryId))
 				.all();
+		}),
+
+	testEmbedding: protectedProcedure
+		.input(
+			z.object({
+				embeddingBaseUrl: z.string().trim().min(1),
+				embeddingApiKey: z.string().trim(),
+				embeddingModel: z.string().trim().min(1),
+				embeddingDimensions: z.number().min(1).default(768),
+			})
+		)
+		.mutation(({ input }) => {
+			return testConnection({
+				baseUrl: input.embeddingBaseUrl,
+				apiKey: input.embeddingApiKey,
+				model: input.embeddingModel,
+				dimensions: input.embeddingDimensions,
+			});
 		}),
 });

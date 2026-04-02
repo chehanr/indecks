@@ -14,7 +14,6 @@ import {
 import { chunk, chunkRelations } from "./schema/chunk";
 import { job } from "./schema/job";
 import { library, libraryRelations } from "./schema/library";
-import { settings } from "./schema/settings";
 import { video, videoRelations } from "./schema/video";
 
 export function createDb() {
@@ -39,7 +38,6 @@ export function createDb() {
 			chunk,
 			chunkRelations,
 			job,
-			settings,
 		},
 	});
 }

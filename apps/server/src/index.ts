@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -7,30 +8,21 @@ import { appRouter } from "@indecks/api/routers/index";
 import { auth } from "@indecks/auth";
 import { db } from "@indecks/db";
 import { library as libraryTable } from "@indecks/db/schema/library";
-import { settings as settingsTable } from "@indecks/db/schema/settings";
 import { env } from "@indecks/env/server";
 import { recoverStaleJobs, startWorker } from "@indecks/pipeline/queue";
-import { VectorDb } from "@indecks/vector";
-import { eq } from "drizzle-orm";
+import { VectorDbManager } from "@indecks/vector";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 
 const RANGE_PATTERN = /bytes=(\d+)-(\d*)/;
 
-const settingsRow = await db
-	.select({ embeddingDimensions: settingsTable.embeddingDimensions })
-	.from(settingsTable)
-	.where(eq(settingsTable.id, "default"))
-	.get();
-
-const vectorDb = new VectorDb(
-	resolve(env.VECTOR_DB_PATH),
-	settingsRow?.embeddingDimensions ?? env.EMBEDDING_DIMENSIONS
-);
+const vectorDbDir = resolve(env.VECTOR_DB_DIR);
+mkdirSync(vectorDbDir, { recursive: true });
+const vectorDbManager = new VectorDbManager(vectorDbDir);
 
 await recoverStaleJobs(db);
-startWorker(db, vectorDb);
+startWorker(db, vectorDbManager);
 
 const app = new Hono();
 
@@ -53,7 +45,7 @@ app.use(
 	trpcServer({
 		router: appRouter,
 		createContext: (_opts, context) => {
-			return createContext({ context, db, vectorDb });
+			return createContext({ context, db, vectorDbManager });
 		},
 	})
 );

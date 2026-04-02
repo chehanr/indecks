@@ -189,8 +189,14 @@ function LibraryDetailPage() {
 	});
 
 	const updateMutation = useMutation({
-		mutationFn: (input: { id: string; embeddingInstruction?: string }) =>
-			trpcClient.library.update.mutate(input),
+		mutationFn: (input: {
+			id: string;
+			embeddingInstruction?: string;
+			embeddingBaseUrl?: string;
+			embeddingApiKey?: string;
+			embeddingModel?: string;
+			embeddingDimensions?: number;
+		}) => trpcClient.library.update.mutate(input),
 		onSuccess: () => {
 			toast.success("Library updated");
 			queryClient.invalidateQueries({ queryKey: [["library", "get"]] });
@@ -200,13 +206,42 @@ function LibraryDetailPage() {
 		},
 	});
 
+	const testMutation = useMutation({
+		mutationFn: (input: {
+			embeddingBaseUrl: string;
+			embeddingApiKey: string;
+			embeddingModel: string;
+			embeddingDimensions: number;
+		}) => trpcClient.library.testEmbedding.mutate(input),
+		onSuccess: (data) => {
+			if (data.ok) {
+				toast.success("Connection successful");
+			} else {
+				toast.error(data.error ?? "Connection failed");
+			}
+		},
+		onError: (err) => {
+			toast.error(err.message);
+		},
+	});
+
 	const [instruction, setInstruction] = useState("");
+	const [baseUrl, setBaseUrl] = useState("");
+	const [apiKey, setApiKey] = useState("");
+	const [model, setModel] = useState("");
+	const [dimensions, setDimensions] = useState(768);
 
 	const library = libraryQuery.data;
 
 	useEffect(() => {
-		setInstruction(library?.embeddingInstruction ?? "");
-	}, [library?.embeddingInstruction]);
+		if (library) {
+			setInstruction(library.embeddingInstruction ?? "");
+			setBaseUrl(library.embeddingBaseUrl ?? "");
+			setApiKey(library.embeddingApiKey ?? "");
+			setModel(library.embeddingModel ?? "");
+			setDimensions(library.embeddingDimensions ?? 768);
+		}
+	}, [library]);
 
 	if (libraryQuery.isLoading) {
 		return (
@@ -228,6 +263,13 @@ function LibraryDetailPage() {
 	);
 	const isIndexing =
 		library.status === "scanning" || library.status === "indexing";
+
+	const hasConfigChanged =
+		instruction !== (library.embeddingInstruction ?? "") ||
+		baseUrl !== (library.embeddingBaseUrl ?? "") ||
+		apiKey !== (library.embeddingApiKey ?? "") ||
+		model !== (library.embeddingModel ?? "") ||
+		dimensions !== (library.embeddingDimensions ?? 768);
 
 	return (
 		<div className="container mx-auto max-w-3xl space-y-6 px-4 py-6">
@@ -255,12 +297,52 @@ function LibraryDetailPage() {
 
 			<Card>
 				<CardHeader>
-					<CardTitle>Embedding Instruction</CardTitle>
+					<CardTitle>Embedding Configuration</CardTitle>
 				</CardHeader>
 				<CardContent>
-					<div className="flex flex-col gap-3">
+					<div className="flex flex-col gap-4">
 						<div className="flex flex-col gap-2">
-							<Label htmlFor="instruction">System Prompt</Label>
+							<Label htmlFor="baseUrl">Base URL</Label>
+							<Input
+								id="baseUrl"
+								onChange={(e) => setBaseUrl(e.target.value)}
+								placeholder="http://localhost:8000/v1"
+								value={baseUrl}
+							/>
+						</div>
+						<div className="flex flex-col gap-2">
+							<Label htmlFor="apiKey">API Key</Label>
+							<Input
+								id="apiKey"
+								onChange={(e) => setApiKey(e.target.value)}
+								placeholder="Optional"
+								type="password"
+								value={apiKey}
+							/>
+						</div>
+						<div className="flex flex-col gap-2">
+							<Label htmlFor="model">Model</Label>
+							<Input
+								id="model"
+								onChange={(e) => setModel(e.target.value)}
+								placeholder="Qwen/Qwen3-Embedding-0.6B"
+								value={model}
+							/>
+						</div>
+						<div className="flex flex-col gap-2">
+							<Label htmlFor="dimensions">Dimensions</Label>
+							<Input
+								id="dimensions"
+								min={1}
+								onChange={(e) =>
+									setDimensions(Number.parseInt(e.target.value, 10) || 768)
+								}
+								type="number"
+								value={dimensions}
+							/>
+						</div>
+						<div className="flex flex-col gap-2">
+							<Label htmlFor="instruction">Embedding Instruction</Label>
 							<Input
 								id="instruction"
 								onChange={(e) => setInstruction(e.target.value)}
@@ -268,25 +350,45 @@ function LibraryDetailPage() {
 								value={instruction}
 							/>
 							<p className="text-muted-foreground text-xs">
-								Overrides the system prompt sent to the embedding model during
-								indexing and search. Leave blank for default.
+								System prompt sent to the embedding model during indexing and
+								search. Leave blank for default.
 							</p>
 						</div>
-						<Button
-							disabled={
-								updateMutation.isPending ||
-								instruction === (library.embeddingInstruction ?? "")
-							}
-							onClick={() =>
-								updateMutation.mutate({
-									id: libraryId,
-									embeddingInstruction: instruction || undefined,
-								})
-							}
-							size="sm"
-						>
-							{updateMutation.isPending ? "Saving..." : "Save"}
-						</Button>
+						<div className="flex gap-2">
+							<Button
+								disabled={updateMutation.isPending || !hasConfigChanged}
+								onClick={() =>
+									updateMutation.mutate({
+										id: libraryId,
+										embeddingInstruction: instruction || undefined,
+										embeddingBaseUrl: baseUrl || undefined,
+										embeddingApiKey: apiKey,
+										embeddingModel: model || undefined,
+										embeddingDimensions: dimensions,
+									})
+								}
+								size="sm"
+							>
+								{updateMutation.isPending ? "Saving..." : "Save"}
+							</Button>
+							<Button
+								disabled={
+									!(baseUrl.trim() && model.trim()) || testMutation.isPending
+								}
+								onClick={() =>
+									testMutation.mutate({
+										embeddingBaseUrl: baseUrl,
+										embeddingApiKey: apiKey,
+										embeddingModel: model,
+										embeddingDimensions: dimensions,
+									})
+								}
+								size="sm"
+								variant="outline"
+							>
+								{testMutation.isPending ? "Testing..." : "Test Connection"}
+							</Button>
+						</div>
 					</div>
 				</CardContent>
 			</Card>

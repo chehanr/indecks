@@ -118,10 +118,10 @@ function SearchPage() {
 	const searchResults = useQuery({
 		...trpc.search.query.queryOptions({
 			query: searchQuery,
-			libraryId: libraryId || undefined,
+			libraryId,
 			limit: 20,
 		}),
-		enabled: searchQuery.length > 0,
+		enabled: searchQuery.length > 0 && libraryId.length > 0,
 	});
 
 	const handleSearch = (e: React.FormEvent) => {
@@ -149,14 +149,14 @@ function SearchPage() {
 							/>
 						</div>
 						<div className="flex flex-col gap-2">
-							<Label htmlFor="library">Library (optional)</Label>
+							<Label htmlFor="library">Library</Label>
 							<select
 								className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 								id="library"
 								onChange={(e) => setLibraryId(e.target.value)}
 								value={libraryId}
 							>
-								<option value="">All libraries</option>
+								<option value="">Select a library</option>
 								{librariesQuery.data?.map((lib) => (
 									<option key={lib.id} value={lib.id}>
 										{lib.name}
@@ -165,7 +165,9 @@ function SearchPage() {
 							</select>
 						</div>
 						<Button
-							disabled={!query.trim() || searchResults.isFetching}
+							disabled={
+								!(query.trim() && libraryId) || searchResults.isFetching
+							}
 							type="submit"
 						>
 							{searchResults.isFetching ? "Searching..." : "Search"}

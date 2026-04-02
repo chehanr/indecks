@@ -15,6 +15,10 @@ export const library = sqliteTable(
 			.default("idle")
 			.notNull(),
 		embeddingInstruction: text("embedding_instruction"),
+		embeddingBaseUrl: text("embedding_base_url"),
+		embeddingApiKey: text("embedding_api_key"),
+		embeddingModel: text("embedding_model"),
+		embeddingDimensions: integer("embedding_dimensions"),
 		videoCount: integer("video_count").default(0).notNull(),
 		createdAt: integer("created_at", { mode: "timestamp_ms" })
 			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)

@@ -9,7 +9,6 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SearchRouteImport } from './routes/search'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as DashboardRouteImport } from './routes/dashboard'
@@ -17,11 +16,6 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as LibrariesIndexRouteImport } from './routes/libraries.index'
 import { Route as LibrariesLibraryIdRouteImport } from './routes/libraries.$libraryId'
 
-const SettingsRoute = SettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const SearchRoute = SearchRouteImport.update({
   id: '/search',
   path: '/search',
@@ -58,7 +52,6 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/search': typeof SearchRoute
-  '/settings': typeof SettingsRoute
   '/libraries/$libraryId': typeof LibrariesLibraryIdRoute
   '/libraries/': typeof LibrariesIndexRoute
 }
@@ -67,7 +60,6 @@ export interface FileRoutesByTo {
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/search': typeof SearchRoute
-  '/settings': typeof SettingsRoute
   '/libraries/$libraryId': typeof LibrariesLibraryIdRoute
   '/libraries': typeof LibrariesIndexRoute
 }
@@ -77,7 +69,6 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
   '/search': typeof SearchRoute
-  '/settings': typeof SettingsRoute
   '/libraries/$libraryId': typeof LibrariesLibraryIdRoute
   '/libraries/': typeof LibrariesIndexRoute
 }
@@ -88,7 +79,6 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/login'
     | '/search'
-    | '/settings'
     | '/libraries/$libraryId'
     | '/libraries/'
   fileRoutesByTo: FileRoutesByTo
@@ -97,7 +87,6 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/login'
     | '/search'
-    | '/settings'
     | '/libraries/$libraryId'
     | '/libraries'
   id:
@@ -106,7 +95,6 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/login'
     | '/search'
-    | '/settings'
     | '/libraries/$libraryId'
     | '/libraries/'
   fileRoutesById: FileRoutesById
@@ -116,20 +104,12 @@ export interface RootRouteChildren {
   DashboardRoute: typeof DashboardRoute
   LoginRoute: typeof LoginRoute
   SearchRoute: typeof SearchRoute
-  SettingsRoute: typeof SettingsRoute
   LibrariesLibraryIdRoute: typeof LibrariesLibraryIdRoute
   LibrariesIndexRoute: typeof LibrariesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/settings': {
-      id: '/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/search': {
       id: '/search'
       path: '/search'
@@ -180,7 +160,6 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardRoute: DashboardRoute,
   LoginRoute: LoginRoute,
   SearchRoute: SearchRoute,
-  SettingsRoute: SettingsRoute,
   LibrariesLibraryIdRoute: LibrariesLibraryIdRoute,
   LibrariesIndexRoute: LibrariesIndexRoute,
 }
