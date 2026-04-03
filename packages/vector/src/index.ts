@@ -17,6 +17,7 @@ const SQLITE_LIB_PATHS = [
 	"/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib",
 	"/usr/local/opt/sqlite3/lib/libsqlite3.dylib",
 	"/usr/lib/x86_64-linux-gnu/libsqlite3.so",
+	"/usr/lib/aarch64-linux-gnu/libsqlite3.so",
 	"/usr/lib/libsqlite3.so",
 	"/usr/lib/libsqlite3.so.0",
 ];

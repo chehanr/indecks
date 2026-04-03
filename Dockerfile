@@ -1,4 +1,4 @@
-FROM oven/bun:1.3.10-alpine@sha256:32f1fcccb1523960b254c4f80973bee1a910d60be000a45c20c9129a1efcffee AS base
+FROM oven/bun:1.3.10-slim@sha256:5d5863f35ad9b3acceee8dc134fb2b89f07831129eaeec81af2b19a23dabe3e0 AS base
 
 # --- Dependencies ---
 FROM base AS deps
@@ -38,7 +38,10 @@ RUN bun install --frozen-lockfile --production
 
 # --- Production ---
 FROM base AS production
-RUN apk add --no-cache ffmpeg=6.1.2-r2 sqlite-libs=3.49.2-r1 gcompat=1.1.0-r4
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg=7:7.1.3-0+deb13u1 \
+    libsqlite3-0=3.46.1-7 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
