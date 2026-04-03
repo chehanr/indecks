@@ -64,6 +64,13 @@
       "when": 1775280000000,
       "tag": "0008_rename_embedder_to_indexer",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1775370000000,
+      "tag": "0009_add_video_file_hash",
+      "breakpoints": true
     }
   ]
 }
