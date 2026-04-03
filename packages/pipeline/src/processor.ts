@@ -266,6 +266,13 @@ export const ProcessorServiceLive = Layer.effect(
 								yield* Effect.promise(() =>
 									unlink(downscaledPath).catch(() => undefined)
 								);
+							} else {
+								yield* Effect.promise(() =>
+									db
+										.update(chunkTable)
+										.set({ embeddingStatus: "error" })
+										.where(eq(chunkTable.id, chunkId))
+								);
 							}
 
 							processed++;

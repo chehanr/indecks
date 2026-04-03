@@ -65,6 +65,8 @@ export const Route = createFileRoute("/libraries/$libraryId")({
 // --- Indexing Progress ---
 
 function IndexingProgress({ jobId }: { jobId: string }) {
+	const [wasActive, setWasActive] = useState(true);
+
 	const jobQuery = useQuery({
 		...trpc.job.get.queryOptions({ id: jobId }),
 		refetchInterval: (query) => {
@@ -81,6 +83,17 @@ function IndexingProgress({ jobId }: { jobId: string }) {
 	});
 
 	const job = jobQuery.data;
+	const isDone =
+		job?.status === "completed" ||
+		job?.status === "failed" ||
+		job?.status === "cancelled";
+
+	if (wasActive && isDone) {
+		setWasActive(false);
+		queryClient.invalidateQueries({ queryKey: [["library", "videos"]] });
+		queryClient.invalidateQueries({ queryKey: [["library", "get"]] });
+	}
+
 	if (!job) {
 		return null;
 	}
@@ -132,6 +145,7 @@ function VideoStatusBadge({ status }: { status: string }) {
 function IndexVideoDialog({
 	videoId,
 	embedders,
+	onJobStarted,
 }: {
 	videoId: string;
 	embedders: {
@@ -141,6 +155,7 @@ function IndexVideoDialog({
 		dimensions: number;
 		isDefault: boolean;
 	}[];
+	onJobStarted?: (jobId: string) => void;
 }) {
 	const [open, setOpen] = useState(false);
 	const [selectedId, setSelectedId] = useState("");
@@ -151,8 +166,9 @@ function IndexVideoDialog({
 				videoId,
 				embedderId: selectedId,
 			}),
-		onSuccess: () => {
+		onSuccess: (data) => {
 			toast.success("Indexing started");
+			onJobStarted?.(data.jobId);
 			queryClient.invalidateQueries({ queryKey: [["job", "list"]] });
 			queryClient.invalidateQueries({ queryKey: [["library", "videos"]] });
 			setOpen(false);
@@ -211,6 +227,7 @@ function IndexVideoDialog({
 function VideoRow({
 	video,
 	embedders,
+	onJobStarted,
 }: {
 	video: {
 		id: string;
@@ -226,6 +243,7 @@ function VideoRow({
 		dimensions: number;
 		isDefault: boolean;
 	}[];
+	onJobStarted?: (jobId: string) => void;
 }) {
 	return (
 		<div className="flex items-center justify-between py-2">
@@ -246,7 +264,11 @@ function VideoRow({
 			</div>
 			<div className="ml-2 flex items-center gap-2">
 				{embedders.length > 0 && (
-					<IndexVideoDialog embedders={embedders} videoId={video.id} />
+					<IndexVideoDialog
+						embedders={embedders}
+						onJobStarted={onJobStarted}
+						videoId={video.id}
+					/>
 				)}
 				<VideoStatusBadge status={video.status} />
 			</div>
@@ -257,9 +279,11 @@ function VideoRow({
 function VideosTab({
 	libraryId,
 	videoCount,
+	onJobStarted,
 }: {
 	libraryId: string;
 	videoCount: number;
+	onJobStarted?: (jobId: string) => void;
 }) {
 	const videosQuery = useQuery(trpc.library.videos.queryOptions({ libraryId }));
 	const embeddersQuery = useQuery(
@@ -289,7 +313,12 @@ function VideosTab({
 			{videosQuery.data && videosQuery.data.length > 0 && (
 				<div className="divide-y">
 					{videosQuery.data.map((video) => (
-						<VideoRow embedders={embedders} key={video.id} video={video} />
+						<VideoRow
+							embedders={embedders}
+							key={video.id}
+							onJobStarted={onJobStarted}
+							video={video}
+						/>
 					))}
 				</div>
 			)}
@@ -731,6 +760,7 @@ function DeleteEmbedderButton({
 function EmbedderCard({
 	embedder,
 	libraryId,
+	onJobStarted,
 }: {
 	embedder: {
 		id: string;
@@ -746,6 +776,7 @@ function EmbedderCard({
 		downscaleFps: number;
 	};
 	libraryId: string;
+	onJobStarted?: (jobId: string) => void;
 }) {
 	const setDefaultMutation = useMutation({
 		mutationFn: () =>
@@ -765,8 +796,9 @@ function EmbedderCard({
 				id: libraryId,
 				embedderId: embedder.id,
 			}),
-		onSuccess: () => {
+		onSuccess: (data) => {
 			toast.success(`Indexing started with ${embedder.name}`);
+			onJobStarted?.(data.jobId);
 			queryClient.invalidateQueries({ queryKey: [["job", "list"]] });
 		},
 		onError: (err) => {
@@ -816,7 +848,13 @@ function EmbedderCard({
 	);
 }
 
-function EmbeddersTab({ libraryId }: { libraryId: string }) {
+function EmbeddersTab({
+	libraryId,
+	onJobStarted,
+}: {
+	libraryId: string;
+	onJobStarted?: (jobId: string) => void;
+}) {
 	const embeddersQuery = useQuery(
 		trpc.embedder.list.queryOptions({ libraryId })
 	);
@@ -828,7 +866,12 @@ function EmbeddersTab({ libraryId }: { libraryId: string }) {
 				<AddEmbedderDialog libraryId={libraryId} />
 			</div>
 			{embeddersQuery.data?.map((emb) => (
-				<EmbedderCard embedder={emb} key={emb.id} libraryId={libraryId} />
+				<EmbedderCard
+					embedder={emb}
+					key={emb.id}
+					libraryId={libraryId}
+					onJobStarted={onJobStarted}
+				/>
 			))}
 			{embeddersQuery.data?.length === 0 && (
 				<p className="text-muted-foreground text-sm">
@@ -1037,9 +1080,25 @@ function LibraryDetailPage() {
 	const libraryQuery = useQuery(
 		trpc.library.get.queryOptions({ id: libraryId })
 	);
-	const jobsQuery = useQuery(
-		trpc.job.list.queryOptions({ libraryId, limit: 5 })
-	);
+	const [trackedJobIds, setTrackedJobIds] = useState<string[]>([]);
+
+	const jobsQuery = useQuery({
+		...trpc.job.list.queryOptions({ libraryId, limit: 10 }),
+		refetchInterval: (query) => {
+			const jobs = query.state.data;
+			const hasActive = jobs?.some(
+				(j) => j.status === "pending" || j.status === "running"
+			);
+			return hasActive ? 3000 : false;
+		},
+	});
+
+	const trackJob = (jobId: string) => {
+		setTrackedJobIds((prev) =>
+			prev.includes(jobId) ? prev : [...prev, jobId]
+		);
+		queryClient.invalidateQueries({ queryKey: [["job", "list"]] });
+	};
 
 	const deleteMutation = useMutation({
 		mutationFn: () => trpcClient.library.delete.mutate({ id: libraryId }),
@@ -1069,9 +1128,16 @@ function LibraryDetailPage() {
 		);
 	}
 
-	const activeJob = jobsQuery.data?.find(
-		(j) => j.status === "pending" || j.status === "running"
-	);
+	const activeJobs =
+		jobsQuery.data?.filter(
+			(j) => j.status === "pending" || j.status === "running"
+		) ?? [];
+
+	const activeJobIds = new Set(activeJobs.map((j) => j.id));
+	const allJobIds = [
+		...activeJobs.map((j) => j.id),
+		...trackedJobIds.filter((id) => !activeJobIds.has(id)),
+	];
 
 	return (
 		<div className="container mx-auto max-w-3xl space-y-6 px-4 py-6">
@@ -1114,7 +1180,13 @@ function LibraryDetailPage() {
 				</AlertDialog>
 			</div>
 
-			{activeJob && <IndexingProgress jobId={activeJob.id} />}
+			{allJobIds.length > 0 && (
+				<div className="space-y-2">
+					{allJobIds.map((jobId) => (
+						<IndexingProgress jobId={jobId} key={jobId} />
+					))}
+				</div>
+			)}
 
 			<Tabs onValueChange={(v) => setTab(v)} value={tab}>
 				<TabsList>
@@ -1124,10 +1196,14 @@ function LibraryDetailPage() {
 				</TabsList>
 				<Separator className="my-4" />
 				<TabsContent value="videos">
-					<VideosTab libraryId={libraryId} videoCount={library.videoCount} />
+					<VideosTab
+						libraryId={libraryId}
+						onJobStarted={trackJob}
+						videoCount={library.videoCount}
+					/>
 				</TabsContent>
 				<TabsContent value="embedders">
-					<EmbeddersTab libraryId={libraryId} />
+					<EmbeddersTab libraryId={libraryId} onJobStarted={trackJob} />
 				</TabsContent>
 				<TabsContent value="search">
 					<SearchTab libraryId={libraryId} />

@@ -231,24 +231,38 @@ export const JobQueueServiceLive = Layer.effect(
 						}
 					});
 
+				const formatErrorMessage = (err: unknown): string => {
+					if (err instanceof Error) {
+						return err.message;
+					}
+					if (typeof err === "object" && err !== null && "_tag" in err) {
+						return (err as { _tag: string })._tag;
+					}
+					return String(err);
+				};
+
+				const failJobWithError = (
+					jobRow: typeof jobTable.$inferSelect,
+					err: unknown
+				) =>
+					Effect.gen(function* () {
+						const msg = formatErrorMessage(err);
+						yield* failJob(db, jobRow.id, msg);
+						if (jobRow.libraryId) {
+							yield* Effect.promise(() =>
+								db
+									.update(libraryTable)
+									.set({ status: "error" })
+									.where(eq(libraryTable.id, jobRow.libraryId as string))
+							).pipe(Effect.ignore);
+						}
+					});
+
 				const runJob = (jobRow: typeof jobTable.$inferSelect) =>
 					processJob(jobRow).pipe(
 						Effect.tap(() => completeJob(db, jobRow.id)),
-						Effect.catchAll((err) =>
-							Effect.gen(function* () {
-								const msg =
-									"_tag" in err ? (err as { _tag: string })._tag : String(err);
-								yield* failJob(db, jobRow.id, msg);
-								if (jobRow.libraryId) {
-									yield* Effect.promise(() =>
-										db
-											.update(libraryTable)
-											.set({ status: "error" })
-											.where(eq(libraryTable.id, jobRow.libraryId as string))
-									).pipe(Effect.ignore);
-								}
-							})
-						)
+						Effect.catchAll((err) => failJobWithError(jobRow, err)),
+						Effect.catchAllDefect((err) => failJobWithError(jobRow, err))
 					);
 
 				const pollOnce = Effect.gen(function* () {
