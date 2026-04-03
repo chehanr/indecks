@@ -78,6 +78,13 @@
       "when": 1775211485012,
       "tag": "0010_cheerful_jamie_braddock",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1775460000000,
+      "tag": "0011_fixup_chunk_indexer_id",
+      "breakpoints": true
     }
   ]
 }
