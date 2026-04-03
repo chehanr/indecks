@@ -1084,6 +1084,20 @@ function LibraryDetailPage() {
 	);
 	const [trackedJobIds, setTrackedJobIds] = useState<string[]>([]);
 
+	useEffect(() => {
+		trpcClient.job.list.query({ libraryId }).then((jobs) => {
+			const activeIds = jobs
+				.filter((j) => j.status === "pending" || j.status === "running")
+				.map((j) => j.id);
+			if (activeIds.length > 0) {
+				setTrackedJobIds((prev) => [
+					...prev,
+					...activeIds.filter((id) => !prev.includes(id)),
+				]);
+			}
+		});
+	}, [libraryId]);
+
 	const trackJob = useCallback((jobId: string) => {
 		setTrackedJobIds((prev) =>
 			prev.includes(jobId) ? prev : [...prev, jobId]

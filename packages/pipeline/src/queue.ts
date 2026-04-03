@@ -1,12 +1,18 @@
 import type { Db } from "@indecks/db";
+import { indexer as indexerTable } from "@indecks/db/schema/indexer";
 import { job as jobTable } from "@indecks/db/schema/job";
 import { library as libraryTable } from "@indecks/db/schema/library";
 import { video as videoTable } from "@indecks/db/schema/video";
 import type { VectorDbManagerShape } from "@indecks/vector";
-import { and, eq } from "drizzle-orm";
-import { Context, Effect, type Fiber, Layer, Schedule } from "effect";
+import { and, eq, inArray, or } from "drizzle-orm";
+import { Context, Duration, Effect, type Fiber, Layer, Schedule } from "effect";
+import { nanoid } from "nanoid";
 
-import { JobMissingFieldError, UnknownJobTypeError } from "./errors";
+import {
+	JobCancelledError,
+	JobMissingFieldError,
+	UnknownJobTypeError,
+} from "./errors";
 import { ProcessorService } from "./processor";
 
 export type JobProgressCallback = (
@@ -157,18 +163,99 @@ export const JobQueueServiceLive = Layer.effect(
 
 		return {
 			recoverStaleJobs: (db) =>
-				Effect.tryPromise({
-					try: async () => {
-						const result = await db
+				Effect.gen(function* () {
+					const result = yield* Effect.promise(() =>
+						db
 							.update(jobTable)
 							.set({
 								status: "pending",
 								progressMessage: "Recovered after server restart",
 							})
-							.where(eq(jobTable.status, "running"));
-						return result.rowsAffected;
-					},
-					catch: () => 0,
+							.where(eq(jobTable.status, "running"))
+					);
+
+					yield* Effect.promise(() =>
+						db
+							.update(videoTable)
+							.set({ status: "pending", errorMessage: null })
+							.where(eq(videoTable.status, "processing"))
+					);
+
+					yield* Effect.promise(() =>
+						db
+							.update(libraryTable)
+							.set({ status: "idle" })
+							.where(
+								or(
+									eq(libraryTable.status, "scanning"),
+									eq(libraryTable.status, "indexing")
+								)
+							)
+					);
+
+					// Create jobs for orphaned pending videos (no active job)
+					const pendingVideos = yield* Effect.promise(() =>
+						db
+							.select({ libraryId: videoTable.libraryId })
+							.from(videoTable)
+							.where(eq(videoTable.status, "pending"))
+							.all()
+					);
+					const orphanLibraryIds = [
+						...new Set(pendingVideos.map((v) => v.libraryId)),
+					];
+
+					if (orphanLibraryIds.length > 0) {
+						const activeJobs = yield* Effect.promise(() =>
+							db
+								.select({
+									libraryId: jobTable.libraryId,
+								})
+								.from(jobTable)
+								.where(
+									and(
+										inArray(jobTable.libraryId, orphanLibraryIds),
+										or(
+											eq(jobTable.status, "pending"),
+											eq(jobTable.status, "running")
+										)
+									)
+								)
+								.all()
+						);
+						const activeLibIds = new Set(activeJobs.map((j) => j.libraryId));
+
+						for (const libId of orphanLibraryIds) {
+							if (activeLibIds.has(libId)) {
+								continue;
+							}
+
+							const idxr = yield* Effect.promise(() =>
+								db
+									.select({ id: indexerTable.id })
+									.from(indexerTable)
+									.where(eq(indexerTable.libraryId, libId))
+									.limit(1)
+									.get()
+							);
+							if (!idxr) {
+								continue;
+							}
+
+							yield* Effect.promise(() =>
+								db.insert(jobTable).values({
+									id: nanoid(),
+									type: "index_library",
+									libraryId: libId,
+									indexerId: idxr.id,
+									status: "pending",
+									progressMessage: "Auto-recovery for pending videos",
+								})
+							);
+						}
+					}
+
+					return result.rowsAffected;
 				}).pipe(Effect.catchAll(() => Effect.succeed(0))),
 
 			startWorker: (db, vectorDbManager, pollInterval = 3000) => {
@@ -218,6 +305,7 @@ export const JobQueueServiceLive = Layer.effect(
 							jobRow.videoId,
 							jobRow.indexerId,
 							vectorDbManager,
+							jobRow.id,
 							onProgress(jobRow.id)
 						);
 					});
@@ -241,6 +329,7 @@ export const JobQueueServiceLive = Layer.effect(
 							vectorDbManager,
 							jobRow.libraryId,
 							jobRow.indexerId,
+							jobRow.id,
 							onProgress(jobRow.id)
 						);
 					});
@@ -274,13 +363,70 @@ export const JobQueueServiceLive = Layer.effect(
 					return String(err);
 				};
 
+				const MAX_RETRIES = 3;
+
+				const resetVideoStatuses = (
+					jobRow: typeof jobTable.$inferSelect,
+					errorMsg: string
+				) =>
+					Effect.gen(function* () {
+						if (jobRow.videoId && jobRow.type === "index_video") {
+							yield* Effect.promise(() =>
+								db
+									.update(videoTable)
+									.set({ status: "error", errorMessage: errorMsg })
+									.where(eq(videoTable.id, jobRow.videoId as string))
+							).pipe(Effect.ignore);
+						}
+						if (jobRow.libraryId && jobRow.type === "index_library") {
+							yield* Effect.promise(() =>
+								db
+									.update(videoTable)
+									.set({ status: "pending", errorMessage: null })
+									.where(
+										and(
+											eq(videoTable.libraryId, jobRow.libraryId as string),
+											eq(videoTable.status, "processing")
+										)
+									)
+							).pipe(Effect.ignore);
+						}
+					});
+
 				const failJobWithError = (
 					jobRow: typeof jobTable.$inferSelect,
 					err: unknown
 				) =>
 					Effect.gen(function* () {
 						const msg = formatErrorMessage(err);
+
+						if (jobRow.retryCount < MAX_RETRIES) {
+							yield* Effect.promise(() =>
+								db
+									.update(jobTable)
+									.set({
+										status: "pending",
+										retryCount: jobRow.retryCount + 1,
+										progressMessage: `Retry ${jobRow.retryCount + 1}/${MAX_RETRIES}: ${msg}`,
+									})
+									.where(eq(jobTable.id, jobRow.id))
+							);
+							yield* resetVideoStatuses(jobRow, msg);
+							yield* Effect.sync(() =>
+								onJobProgress?.(
+									jobRow.id,
+									"pending",
+									0,
+									`Retrying (${jobRow.retryCount + 1}/${MAX_RETRIES})...`,
+									null
+								)
+							);
+							return;
+						}
+
 						yield* failJob(db, jobRow.id, msg);
+						yield* resetVideoStatuses(jobRow, msg);
+
 						if (jobRow.libraryId) {
 							yield* Effect.promise(() =>
 								db
@@ -291,9 +437,47 @@ export const JobQueueServiceLive = Layer.effect(
 						}
 					});
 
+				const handleCancellation = (jobRow: typeof jobTable.$inferSelect) =>
+					Effect.gen(function* () {
+						yield* failJob(db, jobRow.id, "Job cancelled");
+						if (jobRow.videoId) {
+							yield* Effect.promise(() =>
+								db
+									.update(videoTable)
+									.set({ status: "pending", errorMessage: null })
+									.where(eq(videoTable.id, jobRow.videoId as string))
+							).pipe(Effect.ignore);
+						}
+						if (jobRow.libraryId) {
+							yield* Effect.promise(() =>
+								db
+									.update(videoTable)
+									.set({ status: "pending", errorMessage: null })
+									.where(
+										and(
+											eq(videoTable.libraryId, jobRow.libraryId as string),
+											eq(videoTable.status, "processing")
+										)
+									)
+							).pipe(Effect.ignore);
+							yield* Effect.promise(() =>
+								db
+									.update(libraryTable)
+									.set({ status: "idle" })
+									.where(eq(libraryTable.id, jobRow.libraryId as string))
+							).pipe(Effect.ignore);
+						}
+					});
+
 				const runJob = (jobRow: typeof jobTable.$inferSelect) =>
 					processJob(jobRow).pipe(
+						Effect.timeout(Duration.minutes(30)),
 						Effect.tap(() => completeJob(db, jobRow.id)),
+						Effect.catchIf(
+							(err): err is JobCancelledError =>
+								err instanceof JobCancelledError,
+							() => handleCancellation(jobRow)
+						),
 						Effect.catchAll((err) => failJobWithError(jobRow, err)),
 						Effect.catchAllDefect((err) => failJobWithError(jobRow, err))
 					);

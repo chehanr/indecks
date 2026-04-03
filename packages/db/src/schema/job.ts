@@ -18,6 +18,7 @@ export const job = sqliteTable(
 		indexerId: text("indexer_id"),
 		progress: integer("progress").default(0).notNull(),
 		progressMessage: text("progress_message"),
+		retryCount: integer("retry_count").default(0).notNull(),
 		errorMessage: text("error_message"),
 		startedAt: integer("started_at", { mode: "timestamp_ms" }),
 		completedAt: integer("completed_at", { mode: "timestamp_ms" }),

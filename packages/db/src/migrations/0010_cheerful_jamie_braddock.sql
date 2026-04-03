@@ -1,0 +1,1 @@
+ALTER TABLE `job` ADD `retry_count` integer DEFAULT 0 NOT NULL;

@@ -5,16 +5,18 @@ import { FileSystem } from "@effect/platform";
 import type { Db } from "@indecks/db";
 import { chunk as chunkTable } from "@indecks/db/schema/chunk";
 import { indexer as indexerTable } from "@indecks/db/schema/indexer";
+import { job as jobTable } from "@indecks/db/schema/job";
 import { library as libraryTable } from "@indecks/db/schema/library";
 import { video as videoTable } from "@indecks/db/schema/video";
 import type { VectorDb, VectorDbManagerShape } from "@indecks/vector";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { nanoid } from "nanoid";
 
 import type { EmbedConfig } from "./embedder";
 import { EmbedService } from "./embedder";
 import {
+	JobCancelledError,
 	LibraryEmbeddingNotConfiguredError,
 	LibraryNotFoundError,
 	VideoNotFoundError,
@@ -30,6 +32,7 @@ export interface IndexerContext {
 	readonly downscaleFps: number;
 	readonly indexerId: string;
 	readonly instruction?: string;
+	readonly jobId?: string;
 	readonly vectorDb: VectorDb;
 }
 
@@ -57,18 +60,22 @@ export interface ProcessorServiceShape {
 		vectorDbManager: VectorDbManagerShape,
 		libraryId: string,
 		indexerId: string,
+		jobId?: string,
 		onProgress?: ProgressFn
 	) => Effect.Effect<
 		void,
-		LibraryNotFoundError | LibraryEmbeddingNotConfiguredError
+		| LibraryNotFoundError
+		| LibraryEmbeddingNotConfiguredError
+		| JobCancelledError
 	>;
 	readonly processVideo: (
 		db: Db,
 		videoId: string,
 		indexerId: string,
 		vectorDbManager: VectorDbManagerShape,
+		jobId?: string,
 		onProgress?: ProgressFn
-	) => Effect.Effect<void, VideoNotFoundError>;
+	) => Effect.Effect<void, VideoNotFoundError | JobCancelledError>;
 	readonly scanLibraryFolder: (
 		db: Db,
 		libraryId: string,
@@ -266,12 +273,29 @@ export const ProcessorServiceLive = Layer.effect(
 				return added + changed;
 			});
 
+		const checkCancelled = (db: Db, jobId?: string) =>
+			Effect.gen(function* () {
+				if (!jobId) {
+					return;
+				}
+				const row = yield* Effect.promise(() =>
+					db
+						.select({ status: jobTable.status })
+						.from(jobTable)
+						.where(eq(jobTable.id, jobId))
+						.get()
+				);
+				if (row?.status === "cancelled") {
+					return yield* new JobCancelledError({ jobId });
+				}
+			});
+
 		const processVideoForIndexer = (
 			db: Db,
 			vid: { id: string; filePath: string; fileName: string },
 			ctx: IndexerContext,
 			onProgress?: ProgressFn
-		): Effect.Effect<void> =>
+		): Effect.Effect<void, JobCancelledError> =>
 			Effect.gen(function* () {
 				const chunkOpts = {
 					chunkDuration: ctx.chunkDuration,
@@ -289,6 +313,7 @@ export const ProcessorServiceLive = Layer.effect(
 					chunks,
 					(chunkInfo) =>
 						Effect.gen(function* () {
+							yield* checkCancelled(db, ctx.jobId);
 							const chunkId = makeChunkId(
 								vid.id,
 								ctx.indexerId,
@@ -397,8 +422,9 @@ export const ProcessorServiceLive = Layer.effect(
 			videoId: string,
 			indexerId: string,
 			vectorDbManager: VectorDbManagerShape,
+			jobId?: string,
 			onProgress?: ProgressFn
-		): Effect.Effect<void, VideoNotFoundError> =>
+		): Effect.Effect<void, VideoNotFoundError | JobCancelledError> =>
 			Effect.gen(function* () {
 				const vid = yield* Effect.tryPromise({
 					try: () =>
@@ -433,6 +459,7 @@ export const ProcessorServiceLive = Layer.effect(
 				const indexer: IndexerContext = {
 					indexerId: emb.id,
 					vectorDb,
+					jobId,
 					config: {
 						apiKey: emb.apiKey ?? "",
 						baseUrl: emb.baseUrl,
@@ -479,10 +506,13 @@ export const ProcessorServiceLive = Layer.effect(
 			vectorDbManager: VectorDbManagerShape,
 			libraryId: string,
 			indexerId: string,
+			jobId?: string,
 			onProgress?: ProgressFn
 		): Effect.Effect<
 			void,
-			LibraryNotFoundError | LibraryEmbeddingNotConfiguredError
+			| LibraryNotFoundError
+			| LibraryEmbeddingNotConfiguredError
+			| JobCancelledError
 		> =>
 			Effect.gen(function* () {
 				const lib = yield* Effect.tryPromise({
@@ -520,6 +550,7 @@ export const ProcessorServiceLive = Layer.effect(
 				const indexer: IndexerContext = {
 					indexerId: emb.id,
 					vectorDb,
+					jobId,
 					config: {
 						apiKey: emb.apiKey ?? "",
 						baseUrl: emb.baseUrl,
@@ -556,20 +587,23 @@ export const ProcessorServiceLive = Layer.effect(
 						.all()
 				);
 
-				const existingChunks = yield* Effect.promise(() =>
-					db
-						.select({ videoId: chunkTable.videoId })
-						.from(chunkTable)
-						.where(eq(chunkTable.indexerId, indexer.indexerId))
-						.all()
-				);
-				const indexedVideoIds = new Set(existingChunks.map((c) => c.videoId));
-				const videosToProcess = videos.filter(
-					(v) => !indexedVideoIds.has(v.id)
-				);
+				const videosToProcess = videos.filter((v) => v.status === "pending");
 				let processed = 0;
 
 				for (const vid of videosToProcess) {
+					yield* checkCancelled(db, jobId);
+
+					yield* Effect.promise(() =>
+						db
+							.delete(chunkTable)
+							.where(
+								and(
+									eq(chunkTable.videoId, vid.id),
+									eq(chunkTable.indexerId, indexer.indexerId)
+								)
+							)
+					);
+
 					yield* Effect.promise(() =>
 						db
 							.update(videoTable)
