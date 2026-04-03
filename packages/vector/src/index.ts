@@ -192,12 +192,12 @@ export interface VectorDbManagerShape {
 	readonly closeAll: () => Effect.Effect<void>;
 	readonly get: (
 		libraryId: string,
-		embedderId: string,
+		indexerId: string,
 		dimensions: number
 	) => Effect.Effect<VectorDb, VectorDbError | VectorDbDimensionMismatchError>;
 	readonly remove: (
 		libraryId: string,
-		embedderId?: string
+		indexerId?: string
 	) => Effect.Effect<void, VectorDbError>;
 }
 
@@ -221,11 +221,11 @@ export const VectorDbManagerServiceLive = (dir: string) =>
 				})
 			);
 
-			const cacheKey = (libraryId: string, embedderId: string) =>
-				`${libraryId}:${embedderId}`;
+			const cacheKey = (libraryId: string, indexerId: string) =>
+				`${libraryId}:${indexerId}`;
 
-			const dbFileName = (libraryId: string, embedderId: string) =>
-				`vector-${libraryId}-${embedderId}.db`;
+			const dbFileName = (libraryId: string, indexerId: string) =>
+				`vector-${libraryId}-${indexerId}.db`;
 
 			const unlinkSafe = async (path: string) => {
 				await unlink(path).catch(() => undefined);
@@ -245,10 +245,10 @@ export const VectorDbManagerServiceLive = (dir: string) =>
 						}),
 				});
 
-			const removeSingle = (libraryId: string, embedderId: string) =>
+			const removeSingle = (libraryId: string, indexerId: string) =>
 				Effect.gen(function* () {
 					const map = yield* Ref.get(cache);
-					const key = cacheKey(libraryId, embedderId);
+					const key = cacheKey(libraryId, indexerId);
 					const existing = map.get(key);
 					if (existing) {
 						yield* existing.close();
@@ -258,7 +258,7 @@ export const VectorDbManagerServiceLive = (dir: string) =>
 							return next;
 						});
 					}
-					const dbPath = resolve(dir, dbFileName(libraryId, embedderId));
+					const dbPath = resolve(dir, dbFileName(libraryId, indexerId));
 					yield* removeDbFiles(dbPath);
 				});
 
@@ -293,9 +293,9 @@ export const VectorDbManagerServiceLive = (dir: string) =>
 				});
 
 			return {
-				get: (libraryId, embedderId, dimensions) =>
+				get: (libraryId, indexerId, dimensions) =>
 					Effect.gen(function* () {
-						const key = cacheKey(libraryId, embedderId);
+						const key = cacheKey(libraryId, indexerId);
 						const map = yield* Ref.get(cache);
 						const existing = map.get(key);
 						if (existing) {
@@ -308,16 +308,14 @@ export const VectorDbManagerServiceLive = (dir: string) =>
 							}
 							return existing;
 						}
-						const dbPath = resolve(dir, dbFileName(libraryId, embedderId));
+						const dbPath = resolve(dir, dbFileName(libraryId, indexerId));
 						const vdb = yield* makeVectorDb(dbPath, dimensions);
 						yield* Ref.update(cache, (m) => new Map(m).set(key, vdb));
 						return vdb;
 					}),
 
-				remove: (libraryId, embedderId) =>
-					embedderId
-						? removeSingle(libraryId, embedderId)
-						: removeAll(libraryId),
+				remove: (libraryId, indexerId) =>
+					indexerId ? removeSingle(libraryId, indexerId) : removeAll(libraryId),
 
 				closeAll: () =>
 					Effect.gen(function* () {

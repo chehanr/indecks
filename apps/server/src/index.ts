@@ -8,7 +8,7 @@ import { jobEvents } from "@indecks/api/events";
 import { appRouter } from "@indecks/api/routers/index";
 import { AuthService } from "@indecks/auth";
 import { DbService } from "@indecks/db";
-import { embedder as embedderTable } from "@indecks/db/schema/embedder";
+import { indexer as indexerTable } from "@indecks/db/schema/indexer";
 import { library as libraryTable } from "@indecks/db/schema/library";
 import { env } from "@indecks/env/server";
 import {
@@ -29,14 +29,14 @@ mkdirSync(vectorDbDir, { recursive: true });
 const appLayer = makeAppLayer(vectorDbDir);
 const appRuntime = ManagedRuntime.make(appLayer);
 
-// One-time migration: rename vector-${libraryId}.db → vector-${libraryId}-${embedderId}.db
+// One-time migration: rename vector-${libraryId}.db → vector-${libraryId}-${indexerId}.db
 await appRuntime.runPromise(
 	Effect.gen(function* () {
 		const db = yield* DbService;
-		const embedders = yield* Effect.promise(() =>
-			db.select().from(embedderTable).all()
+		const indexers = yield* Effect.promise(() =>
+			db.select().from(indexerTable).all()
 		);
-		for (const emb of embedders) {
+		for (const emb of indexers) {
 			const oldPath = resolve(vectorDbDir, `vector-${emb.libraryId}.db`);
 			const newPath = resolve(
 				vectorDbDir,

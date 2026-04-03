@@ -1,7 +1,7 @@
 import { relations, sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
-import { embedder } from "./embedder";
+import { indexer } from "./indexer";
 import { video } from "./video";
 
 export const library = sqliteTable(
@@ -29,5 +29,5 @@ export const library = sqliteTable(
 
 export const libraryRelations = relations(library, ({ many }) => ({
 	videos: many(video),
-	embedders: many(embedder),
+	indexers: many(indexer),
 }));

@@ -1,13 +1,13 @@
 import { access } from "node:fs/promises";
 import { DbService } from "@indecks/db";
 import { chunk as chunkTable } from "@indecks/db/schema/chunk";
-import { embedder as embedderTable } from "@indecks/db/schema/embedder";
+import { indexer as indexerTable } from "@indecks/db/schema/indexer";
 import { job as jobTable } from "@indecks/db/schema/job";
 import { library as libraryTable } from "@indecks/db/schema/library";
 import { video as videoTable } from "@indecks/db/schema/video";
 import {
-	EmbedderNotFoundError,
 	FolderNotAccessibleError,
+	IndexerNotFoundError,
 	LibraryNotFoundError,
 	VideoNotFoundError,
 } from "@indecks/pipeline/errors";
@@ -149,7 +149,7 @@ export const libraryRouter = router({
 		),
 
 	startIndexing: protectedProcedure
-		.input(z.object({ id: z.string(), embedderId: z.string().min(1) }))
+		.input(z.object({ id: z.string(), indexerId: z.string().min(1) }))
 		.mutation(({ ctx, input }) =>
 			runEffect(
 				ctx.runtime,
@@ -172,14 +172,14 @@ export const libraryRouter = router({
 					const emb = yield* Effect.promise(() =>
 						db
 							.select()
-							.from(embedderTable)
-							.where(eq(embedderTable.id, input.embedderId))
+							.from(indexerTable)
+							.where(eq(indexerTable.id, input.indexerId))
 							.get()
 					);
 
 					if (!emb) {
-						return yield* new EmbedderNotFoundError({
-							embedderId: input.embedderId,
+						return yield* new IndexerNotFoundError({
+							indexerId: input.indexerId,
 						});
 					}
 
@@ -189,7 +189,7 @@ export const libraryRouter = router({
 							id: jobId,
 							type: "index_library",
 							libraryId: input.id,
-							embedderId: input.embedderId,
+							indexerId: input.indexerId,
 							status: "pending",
 						})
 					);
@@ -200,7 +200,7 @@ export const libraryRouter = router({
 		),
 
 	reindexVideo: protectedProcedure
-		.input(z.object({ videoId: z.string(), embedderId: z.string().min(1) }))
+		.input(z.object({ videoId: z.string(), indexerId: z.string().min(1) }))
 		.mutation(({ ctx, input }) =>
 			runEffect(
 				ctx.runtime,
@@ -225,14 +225,14 @@ export const libraryRouter = router({
 					const emb = yield* Effect.promise(() =>
 						db
 							.select()
-							.from(embedderTable)
-							.where(eq(embedderTable.id, input.embedderId))
+							.from(indexerTable)
+							.where(eq(indexerTable.id, input.indexerId))
 							.get()
 					);
 
 					if (!emb) {
-						return yield* new EmbedderNotFoundError({
-							embedderId: input.embedderId,
+						return yield* new IndexerNotFoundError({
+							indexerId: input.indexerId,
 						});
 					}
 
@@ -243,7 +243,7 @@ export const libraryRouter = router({
 							.where(
 								and(
 									eq(chunkTable.videoId, input.videoId),
-									eq(chunkTable.embedderId, input.embedderId)
+									eq(chunkTable.indexerId, input.indexerId)
 								)
 							)
 							.all()
@@ -262,7 +262,7 @@ export const libraryRouter = router({
 								.where(
 									and(
 										eq(chunkTable.videoId, input.videoId),
-										eq(chunkTable.embedderId, input.embedderId)
+										eq(chunkTable.indexerId, input.indexerId)
 									)
 								)
 						);
@@ -282,7 +282,7 @@ export const libraryRouter = router({
 							type: "index_video",
 							videoId: input.videoId,
 							libraryId: vid.libraryId,
-							embedderId: input.embedderId,
+							indexerId: input.indexerId,
 							status: "pending",
 						})
 					);
@@ -311,38 +311,38 @@ export const libraryRouter = router({
 						db
 							.select({
 								videoId: chunkTable.videoId,
-								embedderId: chunkTable.embedderId,
+								indexerId: chunkTable.indexerId,
 							})
 							.from(chunkTable)
 							.where(eq(chunkTable.embeddingStatus, "embedded"))
 							.all()
 					);
 
-					const embedders = yield* Effect.promise(() =>
+					const indexers = yield* Effect.promise(() =>
 						db
-							.select({ id: embedderTable.id, name: embedderTable.name })
-							.from(embedderTable)
-							.where(eq(embedderTable.libraryId, input.libraryId))
+							.select({ id: indexerTable.id, name: indexerTable.name })
+							.from(indexerTable)
+							.where(eq(indexerTable.libraryId, input.libraryId))
 							.all()
 					);
-					const embedderNames = new Map(embedders.map((e) => [e.id, e.name]));
+					const indexerNames = new Map(indexers.map((e) => [e.id, e.name]));
 
-					const videoEmbedders = new Map<string, string[]>();
+					const videoIndexers = new Map<string, string[]>();
 					for (const row of chunkCounts) {
-						const name = embedderNames.get(row.embedderId);
+						const name = indexerNames.get(row.indexerId);
 						if (!name) {
 							continue;
 						}
-						const list = videoEmbedders.get(row.videoId) ?? [];
+						const list = videoIndexers.get(row.videoId) ?? [];
 						if (!list.includes(name)) {
 							list.push(name);
 						}
-						videoEmbedders.set(row.videoId, list);
+						videoIndexers.set(row.videoId, list);
 					}
 
 					return videos.map((v) => ({
 						...v,
-						indexedBy: videoEmbedders.get(v.id) ?? [],
+						indexedBy: videoIndexers.get(v.id) ?? [],
 					}));
 				})
 			)

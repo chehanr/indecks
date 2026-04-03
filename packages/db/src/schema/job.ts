@@ -15,7 +15,7 @@ export const job = sqliteTable(
 			.notNull(),
 		libraryId: text("library_id"),
 		videoId: text("video_id"),
-		embedderId: text("embedder_id"),
+		indexerId: text("indexer_id"),
 		progress: integer("progress").default(0).notNull(),
 		progressMessage: text("progress_message"),
 		errorMessage: text("error_message"),

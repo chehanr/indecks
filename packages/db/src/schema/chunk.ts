@@ -7,7 +7,7 @@ import {
 	text,
 } from "drizzle-orm/sqlite-core";
 
-import { embedder } from "./embedder";
+import { indexer } from "./indexer";
 import { video } from "./video";
 
 export const chunk = sqliteTable(
@@ -17,9 +17,9 @@ export const chunk = sqliteTable(
 		videoId: text("video_id")
 			.notNull()
 			.references(() => video.id, { onDelete: "cascade" }),
-		embedderId: text("embedder_id")
+		indexerId: text("indexer_id")
 			.notNull()
-			.references(() => embedder.id, { onDelete: "cascade" }),
+			.references(() => indexer.id, { onDelete: "cascade" }),
 		startTime: real("start_time").notNull(),
 		endTime: real("end_time").notNull(),
 		isStillFrame: integer("is_still_frame", { mode: "boolean" })
@@ -36,7 +36,7 @@ export const chunk = sqliteTable(
 	},
 	(table) => [
 		index("chunk_video_id_idx").on(table.videoId),
-		index("chunk_embedder_id_idx").on(table.embedderId),
+		index("chunk_indexer_id_idx").on(table.indexerId),
 		index("chunk_embedding_status_idx").on(table.embeddingStatus),
 	]
 );
@@ -46,8 +46,8 @@ export const chunkRelations = relations(chunk, ({ one }) => ({
 		fields: [chunk.videoId],
 		references: [video.id],
 	}),
-	embedder: one(embedder, {
-		fields: [chunk.embedderId],
-		references: [embedder.id],
+	indexer: one(indexer, {
+		fields: [chunk.indexerId],
+		references: [indexer.id],
 	}),
 }));

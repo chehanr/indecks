@@ -200,10 +200,10 @@ export const JobQueueServiceLive = Layer.effect(
 								field: "videoId",
 							});
 						}
-						if (!jobRow.embedderId) {
+						if (!jobRow.indexerId) {
 							return yield* new JobMissingFieldError({
 								jobType: "index_video",
-								field: "embedderId",
+								field: "indexerId",
 							});
 						}
 						const libraryId = yield* resolveLibraryId(db, jobRow);
@@ -216,7 +216,7 @@ export const JobQueueServiceLive = Layer.effect(
 						yield* processor.processVideo(
 							db,
 							jobRow.videoId,
-							jobRow.embedderId,
+							jobRow.indexerId,
 							vectorDbManager,
 							onProgress(jobRow.id)
 						);
@@ -230,17 +230,17 @@ export const JobQueueServiceLive = Layer.effect(
 								field: "libraryId",
 							});
 						}
-						if (!jobRow.embedderId) {
+						if (!jobRow.indexerId) {
 							return yield* new JobMissingFieldError({
 								jobType: "index_library",
-								field: "embedderId",
+								field: "indexerId",
 							});
 						}
 						yield* processor.indexLibrary(
 							db,
 							vectorDbManager,
 							jobRow.libraryId,
-							jobRow.embedderId,
+							jobRow.indexerId,
 							onProgress(jobRow.id)
 						);
 					});

@@ -3,7 +3,7 @@ import { stat, unlink } from "node:fs/promises";
 
 import type { Db } from "@indecks/db";
 import { chunk as chunkTable } from "@indecks/db/schema/chunk";
-import { embedder as embedderTable } from "@indecks/db/schema/embedder";
+import { indexer as indexerTable } from "@indecks/db/schema/indexer";
 import { library as libraryTable } from "@indecks/db/schema/library";
 import { video as videoTable } from "@indecks/db/schema/video";
 import type { VectorDb, VectorDbManagerShape } from "@indecks/vector";
@@ -22,22 +22,22 @@ import { FFmpegService } from "./ffmpeg";
 
 type ProgressFn = (progress: number, message: string) => Effect.Effect<void>;
 
-export interface EmbedderContext {
+export interface IndexerContext {
 	readonly chunkDuration: number;
 	readonly chunkOverlap: number;
 	readonly config: EmbedConfig;
 	readonly downscaleFps: number;
-	readonly embedderId: string;
+	readonly indexerId: string;
 	readonly instruction?: string;
 	readonly vectorDb: VectorDb;
 }
 
 const makeChunkId = (
 	videoId: string,
-	embedderId: string,
+	indexerId: string,
 	startTime: number
 ): string => {
-	const raw = `${videoId}:${embedderId}:${startTime}`;
+	const raw = `${videoId}:${indexerId}:${startTime}`;
 	return createHash("sha256").update(raw).digest("hex").slice(0, 16);
 };
 
@@ -46,7 +46,7 @@ export interface ProcessorServiceShape {
 		db: Db,
 		vectorDbManager: VectorDbManagerShape,
 		libraryId: string,
-		embedderId: string,
+		indexerId: string,
 		onProgress?: ProgressFn
 	) => Effect.Effect<
 		void,
@@ -55,7 +55,7 @@ export interface ProcessorServiceShape {
 	readonly processVideo: (
 		db: Db,
 		videoId: string,
-		embedderId: string,
+		indexerId: string,
 		vectorDbManager: VectorDbManagerShape,
 		onProgress?: ProgressFn
 	) => Effect.Effect<void, VideoNotFoundError>;
@@ -161,10 +161,10 @@ export const ProcessorServiceLive = Layer.effect(
 				return added;
 			});
 
-		const processVideoForEmbedder = (
+		const processVideoForIndexer = (
 			db: Db,
 			vid: { id: string; filePath: string; fileName: string },
-			ctx: EmbedderContext,
+			ctx: IndexerContext,
 			onProgress?: ProgressFn
 		): Effect.Effect<void> =>
 			Effect.gen(function* () {
@@ -186,7 +186,7 @@ export const ProcessorServiceLive = Layer.effect(
 						Effect.gen(function* () {
 							const chunkId = makeChunkId(
 								vid.id,
-								ctx.embedderId,
+								ctx.indexerId,
 								chunkInfo.startTime
 							);
 							const still = yield* ffmpeg.isStillFrame(chunkInfo.chunkPath);
@@ -197,7 +197,7 @@ export const ProcessorServiceLive = Layer.effect(
 									.values({
 										id: chunkId,
 										videoId: vid.id,
-										embedderId: ctx.embedderId,
+										indexerId: ctx.indexerId,
 										startTime: chunkInfo.startTime,
 										endTime: chunkInfo.endTime,
 										isStillFrame: still,
@@ -292,7 +292,7 @@ export const ProcessorServiceLive = Layer.effect(
 		const processVideo = (
 			db: Db,
 			videoId: string,
-			embedderId: string,
+			indexerId: string,
 			vectorDbManager: VectorDbManagerShape,
 			onProgress?: ProgressFn
 		): Effect.Effect<void, VideoNotFoundError> =>
@@ -314,8 +314,8 @@ export const ProcessorServiceLive = Layer.effect(
 				const emb = yield* Effect.promise(() =>
 					db
 						.select()
-						.from(embedderTable)
-						.where(eq(embedderTable.id, embedderId))
+						.from(indexerTable)
+						.where(eq(indexerTable.id, indexerId))
 						.get()
 				);
 
@@ -327,8 +327,8 @@ export const ProcessorServiceLive = Layer.effect(
 					.get(vid.libraryId, emb.id, emb.dimensions)
 					.pipe(Effect.orDie);
 
-				const embedder: EmbedderContext = {
-					embedderId: emb.id,
+				const indexer: IndexerContext = {
+					indexerId: emb.id,
 					vectorDb,
 					config: {
 						apiKey: emb.apiKey ?? "",
@@ -350,7 +350,7 @@ export const ProcessorServiceLive = Layer.effect(
 				);
 
 				yield* progress(onProgress, 0, `Processing ${vid.fileName}...`);
-				yield* processVideoForEmbedder(db, vid, embedder, onProgress);
+				yield* processVideoForIndexer(db, vid, indexer, onProgress);
 
 				yield* Effect.promise(() =>
 					db
@@ -375,7 +375,7 @@ export const ProcessorServiceLive = Layer.effect(
 			db: Db,
 			vectorDbManager: VectorDbManagerShape,
 			libraryId: string,
-			embedderId: string,
+			indexerId: string,
 			onProgress?: ProgressFn
 		): Effect.Effect<
 			void,
@@ -399,8 +399,8 @@ export const ProcessorServiceLive = Layer.effect(
 				const emb = yield* Effect.promise(() =>
 					db
 						.select()
-						.from(embedderTable)
-						.where(eq(embedderTable.id, embedderId))
+						.from(indexerTable)
+						.where(eq(indexerTable.id, indexerId))
 						.get()
 				);
 
@@ -414,8 +414,8 @@ export const ProcessorServiceLive = Layer.effect(
 					.get(libraryId, emb.id, emb.dimensions)
 					.pipe(Effect.orDie);
 
-				const embedder: EmbedderContext = {
-					embedderId: emb.id,
+				const indexer: IndexerContext = {
+					indexerId: emb.id,
 					vectorDb,
 					config: {
 						apiKey: emb.apiKey ?? "",
@@ -457,7 +457,7 @@ export const ProcessorServiceLive = Layer.effect(
 					db
 						.select({ videoId: chunkTable.videoId })
 						.from(chunkTable)
-						.where(eq(chunkTable.embedderId, embedder.embedderId))
+						.where(eq(chunkTable.indexerId, indexer.indexerId))
 						.all()
 				);
 				const indexedVideoIds = new Set(existingChunks.map((c) => c.videoId));
@@ -487,7 +487,7 @@ export const ProcessorServiceLive = Layer.effect(
 							}
 						: undefined;
 
-					yield* processVideoForEmbedder(db, vid, embedder, vidProgress);
+					yield* processVideoForIndexer(db, vid, indexer, vidProgress);
 
 					yield* Effect.promise(() =>
 						db

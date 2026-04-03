@@ -33,10 +33,10 @@ const mapError = (err: { readonly _tag: string }): TRPCError => {
 				code: "BAD_REQUEST",
 				message: "Library embedding not configured",
 			});
-		case "EmbedderNotFoundError":
+		case "IndexerNotFoundError":
 			return new TRPCError({
 				code: "NOT_FOUND",
-				message: `Embedder not found: ${String(record.embedderId)}`,
+				message: `Indexer not found: ${String(record.indexerId)}`,
 			});
 		default:
 			return new TRPCError({

@@ -4,8 +4,8 @@ import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { chunk } from "./chunk";
 import { library } from "./library";
 
-export const embedder = sqliteTable(
-	"embedder",
+export const indexer = sqliteTable(
+	"indexer",
 	{
 		id: text("id").primaryKey(),
 		libraryId: text("library_id")
@@ -31,12 +31,12 @@ export const embedder = sqliteTable(
 			.$onUpdate(() => new Date())
 			.notNull(),
 	},
-	(table) => [index("embedder_library_id_idx").on(table.libraryId)]
+	(table) => [index("indexer_library_id_idx").on(table.libraryId)]
 );
 
-export const embedderRelations = relations(embedder, ({ one, many }) => ({
+export const indexerRelations = relations(indexer, ({ one, many }) => ({
 	library: one(library, {
-		fields: [embedder.libraryId],
+		fields: [indexer.libraryId],
 		references: [library.id],
 	}),
 	chunks: many(chunk),

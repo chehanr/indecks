@@ -1,5 +1,5 @@
 import { publicProcedure, router } from "../index";
-import { embedderRouter } from "./embedder";
+import { indexerRouter } from "./indexer";
 import { jobRouter } from "./job";
 import { libraryRouter } from "./library";
 import { searchRouter } from "./search";
@@ -9,7 +9,7 @@ export const appRouter = router({
 		return "OK";
 	}),
 	library: libraryRouter,
-	embedder: embedderRouter,
+	indexer: indexerRouter,
 	search: searchRouter,
 	job: jobRouter,
 });

@@ -1,7 +1,7 @@
 import { DbService } from "@indecks/db";
-import { embedder as embedderTable } from "@indecks/db/schema/embedder";
+import { indexer as indexerTable } from "@indecks/db/schema/indexer";
 import { EmbedService } from "@indecks/pipeline/embedder";
-import { EmbedderNotFoundError } from "@indecks/pipeline/errors";
+import { IndexerNotFoundError } from "@indecks/pipeline/errors";
 import { VectorDbManagerService } from "@indecks/vector";
 import { and, eq, ne } from "drizzle-orm";
 import { Effect } from "effect";
@@ -11,7 +11,7 @@ import { z } from "zod";
 import { runEffect } from "../effect-trpc";
 import { protectedProcedure, router } from "../index";
 
-export const embedderRouter = router({
+export const indexerRouter = router({
 	list: protectedProcedure
 		.input(z.object({ libraryId: z.string() }))
 		.query(({ ctx, input }) =>
@@ -22,8 +22,8 @@ export const embedderRouter = router({
 					return yield* Effect.promise(() =>
 						db
 							.select()
-							.from(embedderTable)
-							.where(eq(embedderTable.libraryId, input.libraryId))
+							.from(indexerTable)
+							.where(eq(indexerTable.libraryId, input.libraryId))
 							.all()
 					);
 				})
@@ -40,13 +40,13 @@ export const embedderRouter = router({
 					const row = yield* Effect.promise(() =>
 						db
 							.select()
-							.from(embedderTable)
-							.where(eq(embedderTable.id, input.id))
+							.from(indexerTable)
+							.where(eq(indexerTable.id, input.id))
 							.get()
 					);
 					if (!row) {
-						return yield* new EmbedderNotFoundError({
-							embedderId: input.id,
+						return yield* new IndexerNotFoundError({
+							indexerId: input.id,
 						});
 					}
 					return row;
@@ -80,14 +80,14 @@ export const embedderRouter = router({
 					if (input.isDefault) {
 						yield* Effect.promise(() =>
 							db
-								.update(embedderTable)
+								.update(indexerTable)
 								.set({ isDefault: false })
-								.where(eq(embedderTable.libraryId, input.libraryId))
+								.where(eq(indexerTable.libraryId, input.libraryId))
 						);
 					}
 
 					yield* Effect.promise(() =>
-						db.insert(embedderTable).values({
+						db.insert(indexerTable).values({
 							id,
 							libraryId: input.libraryId,
 							name: input.name,
@@ -132,25 +132,21 @@ export const embedderRouter = router({
 					const { id, ...fields } = input;
 
 					const existing = yield* Effect.promise(() =>
-						db
-							.select()
-							.from(embedderTable)
-							.where(eq(embedderTable.id, id))
-							.get()
+						db.select().from(indexerTable).where(eq(indexerTable.id, id)).get()
 					);
 					if (!existing) {
-						return yield* new EmbedderNotFoundError({ embedderId: id });
+						return yield* new IndexerNotFoundError({ indexerId: id });
 					}
 
 					if (fields.isDefault) {
 						yield* Effect.promise(() =>
 							db
-								.update(embedderTable)
+								.update(indexerTable)
 								.set({ isDefault: false })
 								.where(
 									and(
-										eq(embedderTable.libraryId, existing.libraryId),
-										ne(embedderTable.id, id)
+										eq(indexerTable.libraryId, existing.libraryId),
+										ne(indexerTable.id, id)
 									)
 								)
 						);
@@ -165,7 +161,7 @@ export const embedderRouter = router({
 					}
 
 					yield* Effect.promise(() =>
-						db.update(embedderTable).set(set).where(eq(embedderTable.id, id))
+						db.update(indexerTable).set(set).where(eq(indexerTable.id, id))
 					);
 
 					return { success: true };
@@ -185,20 +181,20 @@ export const embedderRouter = router({
 					const existing = yield* Effect.promise(() =>
 						db
 							.select()
-							.from(embedderTable)
-							.where(eq(embedderTable.id, input.id))
+							.from(indexerTable)
+							.where(eq(indexerTable.id, input.id))
 							.get()
 					);
 					if (!existing) {
-						return yield* new EmbedderNotFoundError({
-							embedderId: input.id,
+						return yield* new IndexerNotFoundError({
+							indexerId: input.id,
 						});
 					}
 
 					yield* vectorDbManager.remove(existing.libraryId, existing.id);
 
 					yield* Effect.promise(() =>
-						db.delete(embedderTable).where(eq(embedderTable.id, input.id))
+						db.delete(indexerTable).where(eq(indexerTable.id, input.id))
 					);
 
 					return { success: true };

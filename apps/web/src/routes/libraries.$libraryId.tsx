@@ -152,11 +152,11 @@ function VideoStatusBadge({ status }: { status: string }) {
 
 function IndexVideoDialog({
 	videoId,
-	embedders,
+	indexers,
 	onJobStarted,
 }: {
 	videoId: string;
-	embedders: {
+	indexers: {
 		id: string;
 		name: string;
 		model: string;
@@ -172,7 +172,7 @@ function IndexVideoDialog({
 		mutationFn: () =>
 			trpcClient.library.reindexVideo.mutate({
 				videoId,
-				embedderId: selectedId,
+				indexerId: selectedId,
 			}),
 		onSuccess: (data) => {
 			toast.success("Indexing started");
@@ -189,8 +189,8 @@ function IndexVideoDialog({
 	const handleOpen = (next: boolean) => {
 		setOpen(next);
 		if (next) {
-			const def = embedders.find((e) => e.isDefault);
-			setSelectedId(def?.id ?? embedders[0]?.id ?? "");
+			const def = indexers.find((e) => e.isDefault);
+			setSelectedId(def?.id ?? indexers[0]?.id ?? "");
 		}
 	};
 
@@ -213,7 +213,7 @@ function IndexVideoDialog({
 						onChange={(e) => setSelectedId(e.target.value)}
 						value={selectedId}
 					>
-						{embedders.map((emb) => (
+						{indexers.map((emb) => (
 							<NativeSelectOption key={emb.id} value={emb.id}>
 								{emb.name} ({emb.model}, {emb.dimensions}d)
 								{emb.isDefault ? " — default" : ""}
@@ -234,7 +234,7 @@ function IndexVideoDialog({
 
 function VideoRow({
 	video,
-	embedders,
+	indexers,
 	onJobStarted,
 }: {
 	video: {
@@ -244,7 +244,7 @@ function VideoRow({
 		status: string;
 		indexedBy: string[];
 	};
-	embedders: {
+	indexers: {
 		id: string;
 		name: string;
 		model: string;
@@ -271,9 +271,9 @@ function VideoRow({
 				</div>
 			</div>
 			<div className="ml-2 flex items-center gap-2">
-				{embedders.length > 0 && (
+				{indexers.length > 0 && (
 					<IndexVideoDialog
-						embedders={embedders}
+						indexers={indexers}
 						onJobStarted={onJobStarted}
 						videoId={video.id}
 					/>
@@ -294,10 +294,8 @@ function VideosTab({
 	onJobStarted?: (jobId: string) => void;
 }) {
 	const videosQuery = useQuery(trpc.library.videos.queryOptions({ libraryId }));
-	const embeddersQuery = useQuery(
-		trpc.embedder.list.queryOptions({ libraryId })
-	);
-	const embedders = (embeddersQuery.data ?? []).map((e) => ({
+	const indexersQuery = useQuery(trpc.indexer.list.queryOptions({ libraryId }));
+	const indexers = (indexersQuery.data ?? []).map((e) => ({
 		id: e.id,
 		name: e.name,
 		model: e.model,
@@ -315,14 +313,14 @@ function VideosTab({
 			)}
 			{videosQuery.data?.length === 0 && (
 				<p className="text-muted-foreground text-sm">
-					No videos found. Add an embedder and start indexing.
+					No videos found. Add an indexer and start indexing.
 				</p>
 			)}
 			{videosQuery.data && videosQuery.data.length > 0 && (
 				<div className="divide-y">
 					{videosQuery.data.map((video) => (
 						<VideoRow
-							embedders={embedders}
+							indexers={indexers}
 							key={video.id}
 							onJobStarted={onJobStarted}
 							video={video}
@@ -334,9 +332,9 @@ function VideosTab({
 	);
 }
 
-// --- Embedders Tab ---
+// --- Indexers Tab ---
 
-function EmbedderFormFields({
+function IndexerFormFields({
 	values,
 	onChange,
 	idPrefix,
@@ -464,7 +462,7 @@ function EmbedderFormFields({
 	);
 }
 
-function useEmbedderFormState(initial?: {
+function useIndexerFormState(initial?: {
 	name: string;
 	baseUrl: string;
 	apiKey: string | null;
@@ -499,13 +497,13 @@ function useEmbedderFormState(initial?: {
 	return { values, onChange, canSubmit };
 }
 
-function AddEmbedderDialog({ libraryId }: { libraryId: string }) {
+function AddIndexerDialog({ libraryId }: { libraryId: string }) {
 	const [open, setOpen] = useState(false);
-	const { values, onChange, canSubmit } = useEmbedderFormState();
+	const { values, onChange, canSubmit } = useIndexerFormState();
 
 	const createMutation = useMutation({
 		mutationFn: () =>
-			trpcClient.embedder.create.mutate({
+			trpcClient.indexer.create.mutate({
 				libraryId,
 				name: values.name,
 				baseUrl: values.baseUrl,
@@ -519,8 +517,8 @@ function AddEmbedderDialog({ libraryId }: { libraryId: string }) {
 				downscaleFps: values.downscaleFps,
 			}),
 		onSuccess: () => {
-			toast.success("Embedder added");
-			queryClient.invalidateQueries({ queryKey: [["embedder", "list"]] });
+			toast.success("Indexer added");
+			queryClient.invalidateQueries({ queryKey: [["indexer", "list"]] });
 			setOpen(false);
 		},
 		onError: (err) => {
@@ -530,7 +528,7 @@ function AddEmbedderDialog({ libraryId }: { libraryId: string }) {
 
 	const testMutation = useMutation({
 		mutationFn: () =>
-			trpcClient.embedder.test.mutate({
+			trpcClient.indexer.test.mutate({
 				baseUrl: values.baseUrl,
 				apiKey: values.apiKey,
 				model: values.model,
@@ -554,13 +552,13 @@ function AddEmbedderDialog({ libraryId }: { libraryId: string }) {
 				render={
 					<Button size="sm">
 						<Plus className="size-4" />
-						Add Embedder
+						Add Indexer
 					</Button>
 				}
 			/>
 			<DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
 				<DialogHeader>
-					<DialogTitle>Add Embedder</DialogTitle>
+					<DialogTitle>Add Indexer</DialogTitle>
 				</DialogHeader>
 				<form
 					onSubmit={(e) => {
@@ -569,7 +567,7 @@ function AddEmbedderDialog({ libraryId }: { libraryId: string }) {
 					}}
 				>
 					<FieldGroup>
-						<EmbedderFormFields
+						<IndexerFormFields
 							idPrefix="add-emb"
 							onChange={onChange}
 							values={values}
@@ -600,10 +598,10 @@ function AddEmbedderDialog({ libraryId }: { libraryId: string }) {
 	);
 }
 
-function EditEmbedderDialog({
-	embedder,
+function EditIndexerDialog({
+	indexer,
 }: {
-	embedder: {
+	indexer: {
 		id: string;
 		name: string;
 		baseUrl: string;
@@ -617,12 +615,12 @@ function EditEmbedderDialog({
 	};
 }) {
 	const [open, setOpen] = useState(false);
-	const { values, onChange, canSubmit } = useEmbedderFormState(embedder);
+	const { values, onChange, canSubmit } = useIndexerFormState(indexer);
 
 	const updateMutation = useMutation({
 		mutationFn: () =>
-			trpcClient.embedder.update.mutate({
-				id: embedder.id,
+			trpcClient.indexer.update.mutate({
+				id: indexer.id,
 				name: values.name,
 				baseUrl: values.baseUrl,
 				apiKey: values.apiKey || undefined,
@@ -634,8 +632,8 @@ function EditEmbedderDialog({
 				downscaleFps: values.downscaleFps,
 			}),
 		onSuccess: () => {
-			toast.success("Embedder updated");
-			queryClient.invalidateQueries({ queryKey: [["embedder", "list"]] });
+			toast.success("Indexer updated");
+			queryClient.invalidateQueries({ queryKey: [["indexer", "list"]] });
 			setOpen(false);
 		},
 		onError: (err) => {
@@ -645,7 +643,7 @@ function EditEmbedderDialog({
 
 	const testMutation = useMutation({
 		mutationFn: () =>
-			trpcClient.embedder.test.mutate({
+			trpcClient.indexer.test.mutate({
 				baseUrl: values.baseUrl,
 				apiKey: values.apiKey,
 				model: values.model,
@@ -674,7 +672,7 @@ function EditEmbedderDialog({
 			/>
 			<DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
 				<DialogHeader>
-					<DialogTitle>Edit {embedder.name}</DialogTitle>
+					<DialogTitle>Edit {indexer.name}</DialogTitle>
 				</DialogHeader>
 				<form
 					onSubmit={(e) => {
@@ -683,8 +681,8 @@ function EditEmbedderDialog({
 					}}
 				>
 					<FieldGroup>
-						<EmbedderFormFields
-							idPrefix={`edit-${embedder.id}`}
+						<IndexerFormFields
+							idPrefix={`edit-${indexer.id}`}
 							onChange={onChange}
 							values={values}
 						/>
@@ -714,16 +712,16 @@ function EditEmbedderDialog({
 	);
 }
 
-function DeleteEmbedderButton({
-	embedder,
+function DeleteIndexerButton({
+	indexer,
 }: {
-	embedder: { id: string; name: string };
+	indexer: { id: string; name: string };
 }) {
 	const deleteMutation = useMutation({
-		mutationFn: () => trpcClient.embedder.delete.mutate({ id: embedder.id }),
+		mutationFn: () => trpcClient.indexer.delete.mutate({ id: indexer.id }),
 		onSuccess: () => {
-			toast.success(`Deleted ${embedder.name}`);
-			queryClient.invalidateQueries({ queryKey: [["embedder", "list"]] });
+			toast.success(`Deleted ${indexer.name}`);
+			queryClient.invalidateQueries({ queryKey: [["indexer", "list"]] });
 		},
 		onError: (err) => {
 			toast.error(err.message);
@@ -745,9 +743,9 @@ function DeleteEmbedderButton({
 			/>
 			<AlertDialogContent>
 				<AlertDialogHeader>
-					<AlertDialogTitle>Delete {embedder.name}?</AlertDialogTitle>
+					<AlertDialogTitle>Delete {indexer.name}?</AlertDialogTitle>
 					<AlertDialogDescription>
-						This will remove the embedder, its chunks, and vector data. This
+						This will remove the indexer, its chunks, and vector data. This
 						cannot be undone.
 					</AlertDialogDescription>
 				</AlertDialogHeader>
@@ -765,12 +763,12 @@ function DeleteEmbedderButton({
 	);
 }
 
-function EmbedderCard({
-	embedder,
+function IndexerCard({
+	indexer,
 	libraryId,
 	onJobStarted,
 }: {
-	embedder: {
+	indexer: {
 		id: string;
 		name: string;
 		baseUrl: string;
@@ -788,10 +786,10 @@ function EmbedderCard({
 }) {
 	const setDefaultMutation = useMutation({
 		mutationFn: () =>
-			trpcClient.embedder.update.mutate({ id: embedder.id, isDefault: true }),
+			trpcClient.indexer.update.mutate({ id: indexer.id, isDefault: true }),
 		onSuccess: () => {
-			toast.success(`${embedder.name} set as default`);
-			queryClient.invalidateQueries({ queryKey: [["embedder", "list"]] });
+			toast.success(`${indexer.name} set as default`);
+			queryClient.invalidateQueries({ queryKey: [["indexer", "list"]] });
 		},
 		onError: (err) => {
 			toast.error(err.message);
@@ -802,10 +800,10 @@ function EmbedderCard({
 		mutationFn: () =>
 			trpcClient.library.startIndexing.mutate({
 				id: libraryId,
-				embedderId: embedder.id,
+				indexerId: indexer.id,
 			}),
 		onSuccess: (data) => {
-			toast.success(`Indexing started with ${embedder.name}`);
+			toast.success(`Indexing started with ${indexer.name}`);
 			onJobStarted?.(data.jobId);
 			queryClient.invalidateQueries({ queryKey: [["job", "list"]] });
 		},
@@ -818,16 +816,16 @@ function EmbedderCard({
 		<div className="flex items-center justify-between rounded-md border p-3">
 			<div className="min-w-0 flex-1">
 				<div className="flex items-center gap-2">
-					<p className="font-medium text-sm">{embedder.name}</p>
-					{embedder.isDefault && <Badge variant="secondary">default</Badge>}
+					<p className="font-medium text-sm">{indexer.name}</p>
+					{indexer.isDefault && <Badge variant="secondary">default</Badge>}
 				</div>
 				<p className="text-muted-foreground text-xs">
-					{embedder.model} ({embedder.dimensions}d) | chunk:{" "}
-					{embedder.chunkDuration}s, overlap: {embedder.chunkOverlap}s, fps:{" "}
-					{embedder.downscaleFps}
+					{indexer.model} ({indexer.dimensions}d) | chunk:{" "}
+					{indexer.chunkDuration}s, overlap: {indexer.chunkOverlap}s, fps:{" "}
+					{indexer.downscaleFps}
 				</p>
 				<p className="truncate text-muted-foreground text-xs">
-					{embedder.baseUrl}
+					{indexer.baseUrl}
 				</p>
 			</div>
 			<div className="ml-2 flex items-center gap-1">
@@ -839,8 +837,8 @@ function EmbedderCard({
 				>
 					Index
 				</Button>
-				<EditEmbedderDialog embedder={embedder} />
-				{!embedder.isDefault && (
+				<EditIndexerDialog indexer={indexer} />
+				{!indexer.isDefault && (
 					<Button
 						disabled={setDefaultMutation.isPending}
 						onClick={() => setDefaultMutation.mutate()}
@@ -850,40 +848,38 @@ function EmbedderCard({
 						Set Default
 					</Button>
 				)}
-				<DeleteEmbedderButton embedder={embedder} />
+				<DeleteIndexerButton indexer={indexer} />
 			</div>
 		</div>
 	);
 }
 
-function EmbeddersTab({
+function IndexersTab({
 	libraryId,
 	onJobStarted,
 }: {
 	libraryId: string;
 	onJobStarted?: (jobId: string) => void;
 }) {
-	const embeddersQuery = useQuery(
-		trpc.embedder.list.queryOptions({ libraryId })
-	);
+	const indexersQuery = useQuery(trpc.indexer.list.queryOptions({ libraryId }));
 
 	return (
 		<div className="space-y-4">
 			<div className="flex items-center justify-between">
-				<h2 className="font-medium text-sm">Embedders</h2>
-				<AddEmbedderDialog libraryId={libraryId} />
+				<h2 className="font-medium text-sm">Indexers</h2>
+				<AddIndexerDialog libraryId={libraryId} />
 			</div>
-			{embeddersQuery.data?.map((emb) => (
-				<EmbedderCard
-					embedder={emb}
+			{indexersQuery.data?.map((emb) => (
+				<IndexerCard
+					indexer={emb}
 					key={emb.id}
 					libraryId={libraryId}
 					onJobStarted={onJobStarted}
 				/>
 			))}
-			{embeddersQuery.data?.length === 0 && (
+			{indexersQuery.data?.length === 0 && (
 				<p className="text-muted-foreground text-sm">
-					No embedders configured. Add one to start indexing.
+					No indexers configured. Add one to start indexing.
 				</p>
 			)}
 		</div>
@@ -976,27 +972,25 @@ function SearchTab({ libraryId }: { libraryId: string }) {
 		"q",
 		parseAsString.withDefault("")
 	);
-	const [embedderId, setEmbedderId] = useQueryState(
-		"embedder",
+	const [indexerId, setIndexerId] = useQueryState(
+		"indexer",
 		parseAsString.withDefault("")
 	);
 	const [inputValue, setInputValue] = useState(searchQuery);
 
-	const embeddersQuery = useQuery(
-		trpc.embedder.list.queryOptions({ libraryId })
-	);
+	const indexersQuery = useQuery(trpc.indexer.list.queryOptions({ libraryId }));
 
-	const defaultEmbedder = embeddersQuery.data?.find((e) => e.isDefault);
-	const selectedEmbedderId = embedderId || defaultEmbedder?.id || "";
+	const defaultIndexer = indexersQuery.data?.find((e) => e.isDefault);
+	const selectedIndexerId = indexerId || defaultIndexer?.id || "";
 
 	const searchResults = useQuery({
 		...trpc.search.query.queryOptions({
 			query: searchQuery,
 			libraryId,
-			embedderId: selectedEmbedderId || undefined,
+			indexerId: selectedIndexerId || undefined,
 			limit: 20,
 		}),
-		enabled: searchQuery.length > 0 && selectedEmbedderId.length > 0,
+		enabled: searchQuery.length > 0 && selectedIndexerId.length > 0,
 	});
 
 	const handleSearch = (e: React.FormEvent) => {
@@ -1017,7 +1011,7 @@ function SearchTab({ libraryId }: { libraryId: string }) {
 					/>
 					<Button
 						disabled={
-							!(inputValue.trim() && selectedEmbedderId) ||
+							!(inputValue.trim() && selectedIndexerId) ||
 							searchResults.isFetching
 						}
 						type="submit"
@@ -1026,12 +1020,12 @@ function SearchTab({ libraryId }: { libraryId: string }) {
 						{searchResults.isFetching ? "Searching..." : "Search"}
 					</Button>
 				</div>
-				{embeddersQuery.data && embeddersQuery.data.length > 0 && (
+				{indexersQuery.data && indexersQuery.data.length > 0 && (
 					<NativeSelect
-						onChange={(e) => setEmbedderId(e.target.value || null)}
-						value={selectedEmbedderId}
+						onChange={(e) => setIndexerId(e.target.value || null)}
+						value={selectedIndexerId}
 					>
-						{embeddersQuery.data.map((emb) => (
+						{indexersQuery.data.map((emb) => (
 							<NativeSelectOption key={emb.id} value={emb.id}>
 								{emb.name} ({emb.model}, {emb.dimensions}d)
 								{emb.isDefault ? " — default" : ""}
@@ -1047,8 +1041,8 @@ function SearchTab({ libraryId }: { libraryId: string }) {
 					{searchResults.data.debug.totalVectors} vectors (
 					{searchResults.data.debug.dimensions}d) | embed:{" "}
 					{searchResults.data.debug.embedMs}ms | search:{" "}
-					{searchResults.data.debug.searchMs}ms | embedder:{" "}
-					{searchResults.data.debug.embedderName}
+					{searchResults.data.debug.searchMs}ms | indexer:{" "}
+					{searchResults.data.debug.indexerName}
 				</p>
 			)}
 
@@ -1152,7 +1146,7 @@ function LibraryDetailPage() {
 						<AlertDialogHeader>
 							<AlertDialogTitle>Delete {library.name}?</AlertDialogTitle>
 							<AlertDialogDescription>
-								This will permanently delete the library, all videos, embedders,
+								This will permanently delete the library, all videos, indexers,
 								and vector data.
 							</AlertDialogDescription>
 						</AlertDialogHeader>
@@ -1184,7 +1178,7 @@ function LibraryDetailPage() {
 			<Tabs onValueChange={(v) => setTab(v)} value={tab}>
 				<TabsList>
 					<TabsTrigger value="videos">Videos</TabsTrigger>
-					<TabsTrigger value="embedders">Embedders</TabsTrigger>
+					<TabsTrigger value="indexers">Indexers</TabsTrigger>
 					<TabsTrigger value="search">Search</TabsTrigger>
 				</TabsList>
 				<Separator className="my-4" />
@@ -1195,8 +1189,8 @@ function LibraryDetailPage() {
 						videoCount={library.videoCount}
 					/>
 				</TabsContent>
-				<TabsContent value="embedders">
-					<EmbeddersTab libraryId={libraryId} onJobStarted={trackJob} />
+				<TabsContent value="indexers">
+					<IndexersTab libraryId={libraryId} onJobStarted={trackJob} />
 				</TabsContent>
 				<TabsContent value="search">
 					<SearchTab libraryId={libraryId} />

@@ -57,6 +57,13 @@
       "when": 1775191278318,
       "tag": "0007_married_puma",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1775280000000,
+      "tag": "0008_rename_embedder_to_indexer",
+      "breakpoints": true
     }
   ]
 }

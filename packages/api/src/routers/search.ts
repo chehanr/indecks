@@ -1,11 +1,11 @@
 import { DbService } from "@indecks/db";
 import { chunk as chunkTable } from "@indecks/db/schema/chunk";
-import { embedder as embedderTable } from "@indecks/db/schema/embedder";
+import { indexer as indexerTable } from "@indecks/db/schema/indexer";
 import { video as videoTable } from "@indecks/db/schema/video";
 import type { EmbedConfig } from "@indecks/pipeline/embedder";
 import { EmbedService } from "@indecks/pipeline/embedder";
 import {
-	EmbedderNotFoundError,
+	IndexerNotFoundError,
 	LibraryEmbeddingNotConfiguredError,
 } from "@indecks/pipeline/errors";
 import { VectorDbManagerService } from "@indecks/vector";
@@ -22,7 +22,7 @@ export const searchRouter = router({
 			z.object({
 				query: z.string().min(1),
 				libraryId: z.string().min(1),
-				embedderId: z.string().optional(),
+				indexerId: z.string().optional(),
 				limit: z.number().min(1).max(50).default(10),
 			})
 		)
@@ -34,25 +34,25 @@ export const searchRouter = router({
 					const vectorDbManager = yield* VectorDbManagerService;
 					const embedSvc = yield* EmbedService;
 
-					let emb: typeof embedderTable.$inferSelect | undefined;
+					let emb: typeof indexerTable.$inferSelect | undefined;
 
-					if (input.embedderId) {
-						const embedderId = input.embedderId;
+					if (input.indexerId) {
+						const indexerId = input.indexerId;
 						const row = yield* Effect.promise(() =>
 							db
 								.select()
-								.from(embedderTable)
+								.from(indexerTable)
 								.where(
 									and(
-										eq(embedderTable.id, embedderId),
-										eq(embedderTable.libraryId, input.libraryId)
+										eq(indexerTable.id, indexerId),
+										eq(indexerTable.libraryId, input.libraryId)
 									)
 								)
 								.get()
 						);
 						if (!row) {
-							return yield* new EmbedderNotFoundError({
-								embedderId,
+							return yield* new IndexerNotFoundError({
+								indexerId,
 							});
 						}
 						emb = row;
@@ -60,11 +60,11 @@ export const searchRouter = router({
 						const row = yield* Effect.promise(() =>
 							db
 								.select()
-								.from(embedderTable)
+								.from(indexerTable)
 								.where(
 									and(
-										eq(embedderTable.libraryId, input.libraryId),
-										eq(embedderTable.isDefault, true)
+										eq(indexerTable.libraryId, input.libraryId),
+										eq(indexerTable.isDefault, true)
 									)
 								)
 								.get()
@@ -75,8 +75,8 @@ export const searchRouter = router({
 							const first = yield* Effect.promise(() =>
 								db
 									.select()
-									.from(embedderTable)
-									.where(eq(embedderTable.libraryId, input.libraryId))
+									.from(indexerTable)
+									.where(eq(indexerTable.libraryId, input.libraryId))
 									.limit(1)
 									.get()
 							);
@@ -128,8 +128,8 @@ export const searchRouter = router({
 								searchMs,
 								totalVectors,
 								dimensions: queryEmbedding.length,
-								embedderId: emb.id,
-								embedderName: emb.name,
+								indexerId: emb.id,
+								indexerName: emb.name,
 							},
 						};
 					}
@@ -182,8 +182,8 @@ export const searchRouter = router({
 							searchMs,
 							totalVectors,
 							dimensions: queryEmbedding.length,
-							embedderId: emb.id,
-							embedderName: emb.name,
+							indexerId: emb.id,
+							indexerName: emb.name,
 						},
 					};
 				})
