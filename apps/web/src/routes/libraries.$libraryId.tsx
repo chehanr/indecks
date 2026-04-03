@@ -1,15 +1,52 @@
-import { Button } from "@indecks/ui/components/button";
 import {
-	Card,
-	CardContent,
-	CardHeader,
-	CardTitle,
-} from "@indecks/ui/components/card";
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+	AlertDialogTrigger,
+} from "@indecks/ui/components/alert-dialog";
+import { Badge } from "@indecks/ui/components/badge";
+import { Button } from "@indecks/ui/components/button";
+import { Card, CardContent } from "@indecks/ui/components/card";
+import {
+	Dialog,
+	DialogContent,
+	DialogHeader,
+	DialogTitle,
+	DialogTrigger,
+} from "@indecks/ui/components/dialog";
+import {
+	Field,
+	FieldGroup,
+	FieldLabel,
+	FieldSeparator,
+} from "@indecks/ui/components/field";
 import { Input } from "@indecks/ui/components/input";
-import { Label } from "@indecks/ui/components/label";
+import {
+	NativeSelect,
+	NativeSelectOption,
+} from "@indecks/ui/components/native-select";
+import {
+	Progress,
+	ProgressLabel,
+	ProgressValue,
+} from "@indecks/ui/components/progress";
+import { Separator } from "@indecks/ui/components/separator";
+import {
+	Tabs,
+	TabsContent,
+	TabsList,
+	TabsTrigger,
+} from "@indecks/ui/components/tabs";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { parseAsString, useQueryState } from "nuqs";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { authClient } from "@/lib/auth-client";
@@ -25,28 +62,7 @@ export const Route = createFileRoute("/libraries/$libraryId")({
 	},
 });
 
-function getJobStatusLabel(status: string): string {
-	if (status === "completed") {
-		return "Indexing complete";
-	}
-	if (status === "failed") {
-		return "Indexing failed";
-	}
-	return "Indexing...";
-}
-
-function getVideoStatusClass(status: string): string {
-	if (status === "indexed") {
-		return "bg-green-500/10 text-green-500";
-	}
-	if (status === "processing") {
-		return "bg-blue-500/10 text-blue-500";
-	}
-	if (status === "error") {
-		return "bg-red-500/10 text-red-500";
-	}
-	return "bg-gray-500/10 text-gray-500";
-}
+// --- Indexing Progress ---
 
 function IndexingProgress({ jobId }: { jobId: string }) {
 	const jobQuery = useQuery({
@@ -69,35 +85,47 @@ function IndexingProgress({ jobId }: { jobId: string }) {
 		return null;
 	}
 
+	let statusLabel = "Indexing...";
+	if (job.status === "completed") {
+		statusLabel = "Indexing complete";
+	} else if (job.status === "failed") {
+		statusLabel = "Indexing failed";
+	}
+
 	return (
 		<Card>
 			<CardContent className="py-4">
-				<div className="flex flex-col gap-2">
-					<div className="flex items-center justify-between">
-						<span className="font-medium text-sm">
-							{getJobStatusLabel(job.status)}
-						</span>
-						<span className="text-muted-foreground text-xs">
-							{job.progress}%
-						</span>
-					</div>
-					<div className="h-2 rounded-full bg-secondary">
-						<div
-							className="h-full rounded-full bg-primary transition-all"
-							style={{ width: `${job.progress}%` }}
-						/>
-					</div>
-					{job.progressMessage && (
-						<p className="text-muted-foreground text-xs">
-							{job.progressMessage}
-						</p>
-					)}
-					{job.errorMessage && (
-						<p className="text-destructive text-xs">{job.errorMessage}</p>
-					)}
-				</div>
+				<Progress value={job.progress}>
+					<ProgressLabel>{statusLabel}</ProgressLabel>
+					<ProgressValue />
+				</Progress>
+				{job.progressMessage && (
+					<p className="mt-2 text-muted-foreground text-xs">
+						{job.progressMessage}
+					</p>
+				)}
+				{job.errorMessage && (
+					<p className="mt-2 text-destructive text-xs">{job.errorMessage}</p>
+				)}
 			</CardContent>
 		</Card>
+	);
+}
+
+// --- Videos Tab ---
+
+const videoStatusVariant: Record<
+	string,
+	"default" | "outline" | "destructive" | "secondary"
+> = {
+	indexed: "default",
+	processing: "outline",
+	error: "destructive",
+};
+
+function VideoStatusBadge({ status }: { status: string }) {
+	return (
+		<Badge variant={videoStatusVariant[status] ?? "secondary"}>{status}</Badge>
 	);
 }
 
@@ -129,51 +157,232 @@ function VideoRow({
 					)}
 				</div>
 			</div>
-			<span
-				className={`ml-2 rounded-full px-2 py-0.5 text-xs ${getVideoStatusClass(video.status)}`}
-			>
-				{video.status}
-			</span>
+			<VideoStatusBadge status={video.status} />
 		</div>
 	);
 }
 
-function AddEmbedderForm({
+function VideosTab({
 	libraryId,
-	onDone,
+	videoCount,
 }: {
 	libraryId: string;
-	onDone: () => void;
+	videoCount: number;
 }) {
-	const [name, setName] = useState("");
-	const [baseUrl, setBaseUrl] = useState("");
-	const [apiKey, setApiKey] = useState("");
-	const [model, setModel] = useState("");
-	const [dimensions, setDimensions] = useState(768);
-	const [instruction, setInstruction] = useState("");
-	const [chunkDuration, setChunkDuration] = useState(30);
-	const [chunkOverlap, setChunkOverlap] = useState(5);
-	const [downscaleFps, setDownscaleFps] = useState(5);
+	const videosQuery = useQuery(trpc.library.videos.queryOptions({ libraryId }));
+
+	return (
+		<div className="space-y-4">
+			<div className="flex items-center justify-between">
+				<h2 className="font-medium text-sm">{videoCount} videos</h2>
+			</div>
+			{videosQuery.isLoading && (
+				<p className="text-muted-foreground text-sm">Loading videos...</p>
+			)}
+			{videosQuery.data?.length === 0 && (
+				<p className="text-muted-foreground text-sm">
+					No videos found. Add an embedder and start indexing.
+				</p>
+			)}
+			{videosQuery.data && videosQuery.data.length > 0 && (
+				<div className="divide-y">
+					{videosQuery.data.map((video) => (
+						<VideoRow key={video.id} video={video} />
+					))}
+				</div>
+			)}
+		</div>
+	);
+}
+
+// --- Embedders Tab ---
+
+function EmbedderFormFields({
+	values,
+	onChange,
+	idPrefix,
+}: {
+	values: {
+		name: string;
+		baseUrl: string;
+		apiKey: string;
+		model: string;
+		dimensions: number;
+		instruction: string;
+		chunkDuration: number;
+		chunkOverlap: number;
+		downscaleFps: number;
+	};
+	onChange: (field: string, value: string | number) => void;
+	idPrefix: string;
+}) {
+	return (
+		<>
+			<Field>
+				<FieldLabel htmlFor={`${idPrefix}-name`}>Name</FieldLabel>
+				<Input
+					id={`${idPrefix}-name`}
+					onChange={(e) => onChange("name", e.target.value)}
+					placeholder="Jina CLIP v2"
+					value={values.name}
+				/>
+			</Field>
+			<Field>
+				<FieldLabel htmlFor={`${idPrefix}-baseUrl`}>Base URL</FieldLabel>
+				<Input
+					id={`${idPrefix}-baseUrl`}
+					onChange={(e) => onChange("baseUrl", e.target.value)}
+					placeholder="http://localhost:8000/v1"
+					value={values.baseUrl}
+				/>
+			</Field>
+			<Field>
+				<FieldLabel htmlFor={`${idPrefix}-apiKey`}>API Key</FieldLabel>
+				<Input
+					id={`${idPrefix}-apiKey`}
+					onChange={(e) => onChange("apiKey", e.target.value)}
+					placeholder="Optional"
+					type="password"
+					value={values.apiKey}
+				/>
+			</Field>
+			<Field>
+				<FieldLabel htmlFor={`${idPrefix}-model`}>Model</FieldLabel>
+				<Input
+					id={`${idPrefix}-model`}
+					onChange={(e) => onChange("model", e.target.value)}
+					placeholder="Qwen/Qwen3-Embedding-0.6B"
+					value={values.model}
+				/>
+			</Field>
+			<Field>
+				<FieldLabel htmlFor={`${idPrefix}-dimensions`}>Dimensions</FieldLabel>
+				<Input
+					id={`${idPrefix}-dimensions`}
+					min={1}
+					onChange={(e) =>
+						onChange("dimensions", Number.parseInt(e.target.value, 10) || 768)
+					}
+					type="number"
+					value={values.dimensions}
+				/>
+			</Field>
+			<Field>
+				<FieldLabel htmlFor={`${idPrefix}-instruction`}>
+					Embedding Instruction (optional)
+				</FieldLabel>
+				<Input
+					id={`${idPrefix}-instruction`}
+					onChange={(e) => onChange("instruction", e.target.value)}
+					placeholder="Represent the visual content."
+					value={values.instruction}
+				/>
+			</Field>
+			<FieldSeparator />
+			<Field>
+				<FieldLabel htmlFor={`${idPrefix}-chunkDuration`}>
+					Chunk Duration (seconds)
+				</FieldLabel>
+				<Input
+					id={`${idPrefix}-chunkDuration`}
+					min={1}
+					onChange={(e) =>
+						onChange("chunkDuration", Number.parseInt(e.target.value, 10) || 30)
+					}
+					type="number"
+					value={values.chunkDuration}
+				/>
+			</Field>
+			<Field>
+				<FieldLabel htmlFor={`${idPrefix}-chunkOverlap`}>
+					Chunk Overlap (seconds)
+				</FieldLabel>
+				<Input
+					id={`${idPrefix}-chunkOverlap`}
+					min={0}
+					onChange={(e) =>
+						onChange("chunkOverlap", Number.parseInt(e.target.value, 10) || 0)
+					}
+					type="number"
+					value={values.chunkOverlap}
+				/>
+			</Field>
+			<Field>
+				<FieldLabel htmlFor={`${idPrefix}-downscaleFps`}>
+					Downscale FPS
+				</FieldLabel>
+				<Input
+					id={`${idPrefix}-downscaleFps`}
+					min={1}
+					onChange={(e) =>
+						onChange("downscaleFps", Number.parseInt(e.target.value, 10) || 5)
+					}
+					type="number"
+					value={values.downscaleFps}
+				/>
+			</Field>
+		</>
+	);
+}
+
+function useEmbedderFormState(initial?: {
+	name: string;
+	baseUrl: string;
+	apiKey: string | null;
+	model: string;
+	dimensions: number;
+	instruction: string | null;
+	chunkDuration: number;
+	chunkOverlap: number;
+	downscaleFps: number;
+}) {
+	const [values, setValues] = useState({
+		name: initial?.name ?? "",
+		baseUrl: initial?.baseUrl ?? "",
+		apiKey: initial?.apiKey ?? "",
+		model: initial?.model ?? "",
+		dimensions: initial?.dimensions ?? 768,
+		instruction: initial?.instruction ?? "",
+		chunkDuration: initial?.chunkDuration ?? 30,
+		chunkOverlap: initial?.chunkOverlap ?? 5,
+		downscaleFps: initial?.downscaleFps ?? 5,
+	});
+
+	const onChange = (field: string, value: string | number) => {
+		setValues((prev) => ({ ...prev, [field]: value }));
+	};
+
+	const canSubmit =
+		values.name.trim() !== "" &&
+		values.baseUrl.trim() !== "" &&
+		values.model.trim() !== "";
+
+	return { values, onChange, canSubmit };
+}
+
+function AddEmbedderDialog({ libraryId }: { libraryId: string }) {
+	const [open, setOpen] = useState(false);
+	const { values, onChange, canSubmit } = useEmbedderFormState();
 
 	const createMutation = useMutation({
 		mutationFn: () =>
 			trpcClient.embedder.create.mutate({
 				libraryId,
-				name,
-				baseUrl,
-				apiKey: apiKey || undefined,
-				model,
-				dimensions,
-				instruction: instruction || undefined,
+				name: values.name,
+				baseUrl: values.baseUrl,
+				apiKey: values.apiKey || undefined,
+				model: values.model,
+				dimensions: values.dimensions,
+				instruction: values.instruction || undefined,
 				isDefault: true,
-				chunkDuration,
-				chunkOverlap,
-				downscaleFps,
+				chunkDuration: values.chunkDuration,
+				chunkOverlap: values.chunkOverlap,
+				downscaleFps: values.downscaleFps,
 			}),
 		onSuccess: () => {
 			toast.success("Embedder added");
 			queryClient.invalidateQueries({ queryKey: [["embedder", "list"]] });
-			onDone();
+			setOpen(false);
 		},
 		onError: (err) => {
 			toast.error(err.message);
@@ -183,10 +392,10 @@ function AddEmbedderForm({
 	const testMutation = useMutation({
 		mutationFn: () =>
 			trpcClient.embedder.test.mutate({
-				baseUrl,
-				apiKey,
-				model,
-				dimensions,
+				baseUrl: values.baseUrl,
+				apiKey: values.apiKey,
+				model: values.model,
+				dimensions: values.dimensions,
 			}),
 		onSuccess: (data) => {
 			if (data.ok) {
@@ -200,136 +409,60 @@ function AddEmbedderForm({
 		},
 	});
 
-	const canSubmit = name.trim() && baseUrl.trim() && model.trim();
-
 	return (
-		<div className="flex flex-col gap-4 rounded-md border p-4">
-			<div className="flex flex-col gap-2">
-				<Label htmlFor="emb-name">Name</Label>
-				<Input
-					id="emb-name"
-					onChange={(e) => setName(e.target.value)}
-					placeholder="Jina CLIP v2"
-					value={name}
-				/>
-			</div>
-			<div className="flex flex-col gap-2">
-				<Label htmlFor="emb-baseUrl">Base URL</Label>
-				<Input
-					id="emb-baseUrl"
-					onChange={(e) => setBaseUrl(e.target.value)}
-					placeholder="http://localhost:8000/v1"
-					value={baseUrl}
-				/>
-			</div>
-			<div className="flex flex-col gap-2">
-				<Label htmlFor="emb-apiKey">API Key</Label>
-				<Input
-					id="emb-apiKey"
-					onChange={(e) => setApiKey(e.target.value)}
-					placeholder="Optional"
-					type="password"
-					value={apiKey}
-				/>
-			</div>
-			<div className="flex flex-col gap-2">
-				<Label htmlFor="emb-model">Model</Label>
-				<Input
-					id="emb-model"
-					onChange={(e) => setModel(e.target.value)}
-					placeholder="Qwen/Qwen3-Embedding-0.6B"
-					value={model}
-				/>
-			</div>
-			<div className="flex flex-col gap-2">
-				<Label htmlFor="emb-dimensions">Dimensions</Label>
-				<Input
-					id="emb-dimensions"
-					min={1}
-					onChange={(e) =>
-						setDimensions(Number.parseInt(e.target.value, 10) || 768)
-					}
-					type="number"
-					value={dimensions}
-				/>
-			</div>
-			<div className="flex flex-col gap-2">
-				<Label htmlFor="emb-instruction">
-					Embedding Instruction (optional)
-				</Label>
-				<Input
-					id="emb-instruction"
-					onChange={(e) => setInstruction(e.target.value)}
-					placeholder="Represent the visual content."
-					value={instruction}
-				/>
-			</div>
-
-			<hr />
-
-			<div className="flex flex-col gap-2">
-				<Label htmlFor="emb-chunkDuration">Chunk Duration (seconds)</Label>
-				<Input
-					id="emb-chunkDuration"
-					min={1}
-					onChange={(e) =>
-						setChunkDuration(Number.parseInt(e.target.value, 10) || 30)
-					}
-					type="number"
-					value={chunkDuration}
-				/>
-			</div>
-			<div className="flex flex-col gap-2">
-				<Label htmlFor="emb-chunkOverlap">Chunk Overlap (seconds)</Label>
-				<Input
-					id="emb-chunkOverlap"
-					min={0}
-					onChange={(e) =>
-						setChunkOverlap(Number.parseInt(e.target.value, 10) || 0)
-					}
-					type="number"
-					value={chunkOverlap}
-				/>
-			</div>
-			<div className="flex flex-col gap-2">
-				<Label htmlFor="emb-downscaleFps">Downscale FPS</Label>
-				<Input
-					id="emb-downscaleFps"
-					min={1}
-					onChange={(e) =>
-						setDownscaleFps(Number.parseInt(e.target.value, 10) || 5)
-					}
-					type="number"
-					value={downscaleFps}
-				/>
-			</div>
-			<div className="flex gap-2">
-				<Button
-					disabled={!canSubmit || createMutation.isPending}
-					onClick={() => createMutation.mutate()}
-					size="sm"
+		<Dialog onOpenChange={setOpen} open={open}>
+			<DialogTrigger
+				render={
+					<Button size="sm">
+						<Plus className="size-4" />
+						Add Embedder
+					</Button>
+				}
+			/>
+			<DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
+				<DialogHeader>
+					<DialogTitle>Add Embedder</DialogTitle>
+				</DialogHeader>
+				<form
+					onSubmit={(e) => {
+						e.preventDefault();
+						createMutation.mutate();
+					}}
 				>
-					{createMutation.isPending ? "Adding..." : "Add Embedder"}
-				</Button>
-				<Button
-					disabled={!(baseUrl.trim() && model.trim()) || testMutation.isPending}
-					onClick={() => testMutation.mutate()}
-					size="sm"
-					variant="outline"
-				>
-					{testMutation.isPending ? "Testing..." : "Test Connection"}
-				</Button>
-				<Button onClick={onDone} size="sm" variant="ghost">
-					Cancel
-				</Button>
-			</div>
-		</div>
+					<FieldGroup>
+						<EmbedderFormFields
+							idPrefix="add-emb"
+							onChange={onChange}
+							values={values}
+						/>
+						<div className="flex gap-2">
+							<Button
+								disabled={!canSubmit || createMutation.isPending}
+								type="submit"
+							>
+								{createMutation.isPending ? "Adding..." : "Add"}
+							</Button>
+							<Button
+								disabled={
+									!(values.baseUrl.trim() && values.model.trim()) ||
+									testMutation.isPending
+								}
+								onClick={() => testMutation.mutate()}
+								type="button"
+								variant="outline"
+							>
+								{testMutation.isPending ? "Testing..." : "Test"}
+							</Button>
+						</div>
+					</FieldGroup>
+				</form>
+			</DialogContent>
+		</Dialog>
 	);
 }
 
-function EditEmbedderForm({
+function EditEmbedderDialog({
 	embedder,
-	onDone,
 }: {
 	embedder: {
 		id: string;
@@ -343,36 +476,28 @@ function EditEmbedderForm({
 		chunkOverlap: number;
 		downscaleFps: number;
 	};
-	onDone: () => void;
 }) {
-	const [name, setName] = useState(embedder.name);
-	const [baseUrl, setBaseUrl] = useState(embedder.baseUrl);
-	const [apiKey, setApiKey] = useState(embedder.apiKey ?? "");
-	const [model, setModel] = useState(embedder.model);
-	const [dimensions, setDimensions] = useState(embedder.dimensions);
-	const [instruction, setInstruction] = useState(embedder.instruction ?? "");
-	const [chunkDuration, setChunkDuration] = useState(embedder.chunkDuration);
-	const [chunkOverlap, setChunkOverlap] = useState(embedder.chunkOverlap);
-	const [downscaleFps, setDownscaleFps] = useState(embedder.downscaleFps);
+	const [open, setOpen] = useState(false);
+	const { values, onChange, canSubmit } = useEmbedderFormState(embedder);
 
 	const updateMutation = useMutation({
 		mutationFn: () =>
 			trpcClient.embedder.update.mutate({
 				id: embedder.id,
-				name,
-				baseUrl,
-				apiKey: apiKey || undefined,
-				model,
-				dimensions,
-				instruction: instruction || undefined,
-				chunkDuration,
-				chunkOverlap,
-				downscaleFps,
+				name: values.name,
+				baseUrl: values.baseUrl,
+				apiKey: values.apiKey || undefined,
+				model: values.model,
+				dimensions: values.dimensions,
+				instruction: values.instruction || undefined,
+				chunkDuration: values.chunkDuration,
+				chunkOverlap: values.chunkOverlap,
+				downscaleFps: values.downscaleFps,
 			}),
 		onSuccess: () => {
 			toast.success("Embedder updated");
 			queryClient.invalidateQueries({ queryKey: [["embedder", "list"]] });
-			onDone();
+			setOpen(false);
 		},
 		onError: (err) => {
 			toast.error(err.message);
@@ -381,7 +506,12 @@ function EditEmbedderForm({
 
 	const testMutation = useMutation({
 		mutationFn: () =>
-			trpcClient.embedder.test.mutate({ baseUrl, apiKey, model, dimensions }),
+			trpcClient.embedder.test.mutate({
+				baseUrl: values.baseUrl,
+				apiKey: values.apiKey,
+				model: values.model,
+				dimensions: values.dimensions,
+			}),
 		onSuccess: (data) => {
 			if (data.ok) {
 				toast.success("Connection successful");
@@ -394,133 +524,105 @@ function EditEmbedderForm({
 		},
 	});
 
-	const canSubmit = name.trim() && baseUrl.trim() && model.trim();
+	return (
+		<Dialog onOpenChange={setOpen} open={open}>
+			<DialogTrigger
+				render={
+					<Button size="icon-sm" variant="ghost">
+						<Pencil className="size-3.5" />
+					</Button>
+				}
+			/>
+			<DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
+				<DialogHeader>
+					<DialogTitle>Edit {embedder.name}</DialogTitle>
+				</DialogHeader>
+				<form
+					onSubmit={(e) => {
+						e.preventDefault();
+						updateMutation.mutate();
+					}}
+				>
+					<FieldGroup>
+						<EmbedderFormFields
+							idPrefix={`edit-${embedder.id}`}
+							onChange={onChange}
+							values={values}
+						/>
+						<div className="flex gap-2">
+							<Button
+								disabled={!canSubmit || updateMutation.isPending}
+								type="submit"
+							>
+								{updateMutation.isPending ? "Saving..." : "Save"}
+							</Button>
+							<Button
+								disabled={
+									!(values.baseUrl.trim() && values.model.trim()) ||
+									testMutation.isPending
+								}
+								onClick={() => testMutation.mutate()}
+								type="button"
+								variant="outline"
+							>
+								{testMutation.isPending ? "Testing..." : "Test"}
+							</Button>
+						</div>
+					</FieldGroup>
+				</form>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
+function DeleteEmbedderButton({
+	embedder,
+}: {
+	embedder: { id: string; name: string };
+}) {
+	const deleteMutation = useMutation({
+		mutationFn: () => trpcClient.embedder.delete.mutate({ id: embedder.id }),
+		onSuccess: () => {
+			toast.success(`Deleted ${embedder.name}`);
+			queryClient.invalidateQueries({ queryKey: [["embedder", "list"]] });
+		},
+		onError: (err) => {
+			toast.error(err.message);
+		},
+	});
 
 	return (
-		<div className="flex flex-col gap-4 rounded-md border p-4">
-			<div className="flex flex-col gap-2">
-				<Label htmlFor={`edit-name-${embedder.id}`}>Name</Label>
-				<Input
-					id={`edit-name-${embedder.id}`}
-					onChange={(e) => setName(e.target.value)}
-					value={name}
-				/>
-			</div>
-			<div className="flex flex-col gap-2">
-				<Label htmlFor={`edit-baseUrl-${embedder.id}`}>Base URL</Label>
-				<Input
-					id={`edit-baseUrl-${embedder.id}`}
-					onChange={(e) => setBaseUrl(e.target.value)}
-					value={baseUrl}
-				/>
-			</div>
-			<div className="flex flex-col gap-2">
-				<Label htmlFor={`edit-apiKey-${embedder.id}`}>API Key</Label>
-				<Input
-					id={`edit-apiKey-${embedder.id}`}
-					onChange={(e) => setApiKey(e.target.value)}
-					placeholder="Optional"
-					type="password"
-					value={apiKey}
-				/>
-			</div>
-			<div className="flex flex-col gap-2">
-				<Label htmlFor={`edit-model-${embedder.id}`}>Model</Label>
-				<Input
-					id={`edit-model-${embedder.id}`}
-					onChange={(e) => setModel(e.target.value)}
-					value={model}
-				/>
-			</div>
-			<div className="flex flex-col gap-2">
-				<Label htmlFor={`edit-dimensions-${embedder.id}`}>Dimensions</Label>
-				<Input
-					id={`edit-dimensions-${embedder.id}`}
-					min={1}
-					onChange={(e) =>
-						setDimensions(Number.parseInt(e.target.value, 10) || 768)
-					}
-					type="number"
-					value={dimensions}
-				/>
-			</div>
-			<div className="flex flex-col gap-2">
-				<Label htmlFor={`edit-instruction-${embedder.id}`}>
-					Embedding Instruction (optional)
-				</Label>
-				<Input
-					id={`edit-instruction-${embedder.id}`}
-					onChange={(e) => setInstruction(e.target.value)}
-					placeholder="Represent the visual content."
-					value={instruction}
-				/>
-			</div>
-
-			<hr />
-
-			<div className="flex flex-col gap-2">
-				<Label htmlFor={`edit-chunkDuration-${embedder.id}`}>
-					Chunk Duration (seconds)
-				</Label>
-				<Input
-					id={`edit-chunkDuration-${embedder.id}`}
-					min={1}
-					onChange={(e) =>
-						setChunkDuration(Number.parseInt(e.target.value, 10) || 30)
-					}
-					type="number"
-					value={chunkDuration}
-				/>
-			</div>
-			<div className="flex flex-col gap-2">
-				<Label htmlFor={`edit-chunkOverlap-${embedder.id}`}>
-					Chunk Overlap (seconds)
-				</Label>
-				<Input
-					id={`edit-chunkOverlap-${embedder.id}`}
-					min={0}
-					onChange={(e) =>
-						setChunkOverlap(Number.parseInt(e.target.value, 10) || 0)
-					}
-					type="number"
-					value={chunkOverlap}
-				/>
-			</div>
-			<div className="flex flex-col gap-2">
-				<Label htmlFor={`edit-downscaleFps-${embedder.id}`}>
-					Downscale FPS
-				</Label>
-				<Input
-					id={`edit-downscaleFps-${embedder.id}`}
-					min={1}
-					onChange={(e) =>
-						setDownscaleFps(Number.parseInt(e.target.value, 10) || 5)
-					}
-					type="number"
-					value={downscaleFps}
-				/>
-			</div>
-			<div className="flex gap-2">
-				<Button
-					disabled={!canSubmit || updateMutation.isPending}
-					onClick={() => updateMutation.mutate()}
-					size="sm"
-				>
-					{updateMutation.isPending ? "Saving..." : "Save"}
-				</Button>
-				<Button
-					disabled={!(baseUrl.trim() && model.trim()) || testMutation.isPending}
-					onClick={() => testMutation.mutate()}
-					size="sm"
-					variant="outline"
-				>
-					{testMutation.isPending ? "Testing..." : "Test Connection"}
-				</Button>
-				<Button onClick={onDone} size="sm" variant="ghost">
-					Cancel
-				</Button>
-			</div>
-		</div>
+		<AlertDialog>
+			<AlertDialogTrigger
+				render={
+					<Button
+						disabled={deleteMutation.isPending}
+						size="icon-sm"
+						variant="ghost"
+					>
+						<Trash2 className="size-3.5" />
+					</Button>
+				}
+			/>
+			<AlertDialogContent>
+				<AlertDialogHeader>
+					<AlertDialogTitle>Delete {embedder.name}?</AlertDialogTitle>
+					<AlertDialogDescription>
+						This will remove the embedder, its chunks, and vector data. This
+						cannot be undone.
+					</AlertDialogDescription>
+				</AlertDialogHeader>
+				<AlertDialogFooter>
+					<AlertDialogCancel>Cancel</AlertDialogCancel>
+					<AlertDialogAction
+						onClick={() => deleteMutation.mutate()}
+						variant="destructive"
+					>
+						Delete
+					</AlertDialogAction>
+				</AlertDialogFooter>
+			</AlertDialogContent>
+		</AlertDialog>
 	);
 }
 
@@ -543,19 +645,6 @@ function EmbedderCard({
 	};
 	libraryId: string;
 }) {
-	const [editing, setEditing] = useState(false);
-
-	const deleteMutation = useMutation({
-		mutationFn: () => trpcClient.embedder.delete.mutate({ id: embedder.id }),
-		onSuccess: () => {
-			toast.success(`Deleted ${embedder.name}`);
-			queryClient.invalidateQueries({ queryKey: [["embedder", "list"]] });
-		},
-		onError: (err) => {
-			toast.error(err.message);
-		},
-	});
-
 	const setDefaultMutation = useMutation({
 		mutationFn: () =>
 			trpcClient.embedder.update.mutate({ id: embedder.id, isDefault: true }),
@@ -583,22 +672,12 @@ function EmbedderCard({
 		},
 	});
 
-	if (editing) {
-		return (
-			<EditEmbedderForm embedder={embedder} onDone={() => setEditing(false)} />
-		);
-	}
-
 	return (
 		<div className="flex items-center justify-between rounded-md border p-3">
 			<div className="min-w-0 flex-1">
 				<div className="flex items-center gap-2">
 					<p className="font-medium text-sm">{embedder.name}</p>
-					{embedder.isDefault && (
-						<span className="rounded-full bg-primary/10 px-2 py-0.5 text-primary text-xs">
-							default
-						</span>
-					)}
+					{embedder.isDefault && <Badge variant="secondary">default</Badge>}
 				</div>
 				<p className="text-muted-foreground text-xs">
 					{embedder.model} ({embedder.dimensions}d) | chunk:{" "}
@@ -614,50 +693,250 @@ function EmbedderCard({
 					disabled={indexMutation.isPending}
 					onClick={() => indexMutation.mutate()}
 					size="sm"
-					variant="ghost"
+					variant="outline"
 				>
 					Index
 				</Button>
-				<Button onClick={() => setEditing(true)} size="sm" variant="ghost">
-					Edit
-				</Button>
+				<EditEmbedderDialog embedder={embedder} />
 				{!embedder.isDefault && (
 					<Button
 						disabled={setDefaultMutation.isPending}
 						onClick={() => setDefaultMutation.mutate()}
-						size="sm"
+						size="xs"
 						variant="ghost"
 					>
 						Set Default
 					</Button>
 				)}
-				<Button
-					disabled={deleteMutation.isPending}
-					onClick={() => deleteMutation.mutate()}
-					size="sm"
-					variant="ghost"
-				>
-					Delete
-				</Button>
+				<DeleteEmbedderButton embedder={embedder} />
 			</div>
 		</div>
 	);
 }
 
+function EmbeddersTab({ libraryId }: { libraryId: string }) {
+	const embeddersQuery = useQuery(
+		trpc.embedder.list.queryOptions({ libraryId })
+	);
+
+	return (
+		<div className="space-y-4">
+			<div className="flex items-center justify-between">
+				<h2 className="font-medium text-sm">Embedders</h2>
+				<AddEmbedderDialog libraryId={libraryId} />
+			</div>
+			{embeddersQuery.data?.map((emb) => (
+				<EmbedderCard embedder={emb} key={emb.id} libraryId={libraryId} />
+			))}
+			{embeddersQuery.data?.length === 0 && (
+				<p className="text-muted-foreground text-sm">
+					No embedders configured. Add one to start indexing.
+				</p>
+			)}
+		</div>
+	);
+}
+
+// --- Search Tab ---
+
+function formatTime(seconds: number): string {
+	const mins = Math.floor(seconds / 60);
+	const secs = Math.floor(seconds % 60);
+	return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
+interface SearchResult {
+	chunkId: string;
+	distance: number;
+	endTime: number;
+	fileName: string;
+	filePath: string;
+	libraryId: string;
+	score: number;
+	startTime: number;
+	videoId: string;
+}
+
+function VideoPlayer({
+	filePath,
+	startTime,
+}: {
+	filePath: string;
+	startTime: number;
+}) {
+	const videoRef = useRef<HTMLVideoElement>(null);
+	const serverUrl = import.meta.env.VITE_SERVER_URL as string;
+	const src = `${serverUrl}/api/video?path=${encodeURIComponent(filePath)}#t=${startTime}`;
+
+	return (
+		<video
+			className="w-full rounded-md"
+			controls
+			muted
+			preload="metadata"
+			ref={videoRef}
+			src={src}
+		/>
+	);
+}
+
+function SearchResultCard({ result }: { result: SearchResult }) {
+	const [showPlayer, setShowPlayer] = useState(false);
+
+	return (
+		<div className="rounded-md border p-3">
+			<div className="flex items-center justify-between">
+				<div className="min-w-0 flex-1">
+					<p className="truncate font-medium text-sm">{result.fileName}</p>
+					<p className="text-muted-foreground text-xs">
+						{formatTime(result.startTime)} – {formatTime(result.endTime)}
+					</p>
+				</div>
+				<div className="ml-2 flex items-center gap-2">
+					<Badge variant="secondary">{(result.score * 100).toFixed(1)}%</Badge>
+					<Button
+						onClick={() => setShowPlayer(!showPlayer)}
+						size="xs"
+						variant="outline"
+					>
+						{showPlayer ? "Hide" : "Play"}
+					</Button>
+				</div>
+			</div>
+			<p className="mt-1 font-mono text-[10px] text-muted-foreground">
+				chunk: {result.chunkId} | distance: {result.distance.toFixed(4)}
+			</p>
+			{showPlayer && (
+				<div className="mt-2">
+					<VideoPlayer
+						filePath={result.filePath}
+						startTime={result.startTime}
+					/>
+				</div>
+			)}
+		</div>
+	);
+}
+
+function SearchTab({ libraryId }: { libraryId: string }) {
+	const [searchQuery, setSearchQuery] = useQueryState(
+		"q",
+		parseAsString.withDefault("")
+	);
+	const [embedderId, setEmbedderId] = useQueryState(
+		"embedder",
+		parseAsString.withDefault("")
+	);
+	const [inputValue, setInputValue] = useState(searchQuery);
+
+	const embeddersQuery = useQuery(
+		trpc.embedder.list.queryOptions({ libraryId })
+	);
+
+	const defaultEmbedder = embeddersQuery.data?.find((e) => e.isDefault);
+	const selectedEmbedderId = embedderId || defaultEmbedder?.id || "";
+
+	const searchResults = useQuery({
+		...trpc.search.query.queryOptions({
+			query: searchQuery,
+			libraryId,
+			embedderId: selectedEmbedderId || undefined,
+			limit: 20,
+		}),
+		enabled: searchQuery.length > 0 && selectedEmbedderId.length > 0,
+	});
+
+	const handleSearch = (e: React.FormEvent) => {
+		e.preventDefault();
+		setSearchQuery(inputValue.trim() || null);
+	};
+
+	return (
+		<div className="space-y-4">
+			<form className="flex flex-col gap-3" onSubmit={handleSearch}>
+				<div className="flex gap-2">
+					<Input
+						autoComplete="off"
+						className="flex-1"
+						onChange={(e) => setInputValue(e.target.value)}
+						placeholder="Describe what you're looking for..."
+						value={inputValue}
+					/>
+					<Button
+						disabled={
+							!(inputValue.trim() && selectedEmbedderId) ||
+							searchResults.isFetching
+						}
+						type="submit"
+					>
+						<Search className="size-4" />
+						{searchResults.isFetching ? "Searching..." : "Search"}
+					</Button>
+				</div>
+				{embeddersQuery.data && embeddersQuery.data.length > 0 && (
+					<NativeSelect
+						onChange={(e) => setEmbedderId(e.target.value || null)}
+						value={selectedEmbedderId}
+					>
+						{embeddersQuery.data.map((emb) => (
+							<NativeSelectOption key={emb.id} value={emb.id}>
+								{emb.name} ({emb.model}, {emb.dimensions}d)
+								{emb.isDefault ? " — default" : ""}
+							</NativeSelectOption>
+						))}
+					</NativeSelect>
+				)}
+			</form>
+
+			{searchResults.data?.debug && (
+				<p className="font-mono text-muted-foreground text-xs">
+					{searchResults.data.results.length} results from{" "}
+					{searchResults.data.debug.totalVectors} vectors (
+					{searchResults.data.debug.dimensions}d) | embed:{" "}
+					{searchResults.data.debug.embedMs}ms | search:{" "}
+					{searchResults.data.debug.searchMs}ms | embedder:{" "}
+					{searchResults.data.debug.embedderName}
+				</p>
+			)}
+
+			{searchResults.data && searchResults.data.results.length > 0 && (
+				<div className="space-y-3">
+					{searchResults.data.results.map((result) => (
+						<SearchResultCard key={result.chunkId} result={result} />
+					))}
+				</div>
+			)}
+
+			{searchResults.data?.results.length === 0 && (
+				<p className="text-muted-foreground text-sm">
+					No results found. Try a different query.
+				</p>
+			)}
+
+			{searchResults.error && (
+				<p className="text-destructive text-sm">
+					{searchResults.error.message}
+				</p>
+			)}
+		</div>
+	);
+}
+
+// --- Main Page ---
+
 function LibraryDetailPage() {
 	const { libraryId } = Route.useParams();
 	const navigate = useNavigate();
-	const [showAddForm, setShowAddForm] = useState(false);
+	const [tab, setTab] = useQueryState(
+		"tab",
+		parseAsString.withDefault("videos")
+	);
 
 	const libraryQuery = useQuery(
 		trpc.library.get.queryOptions({ id: libraryId })
 	);
-	const videosQuery = useQuery(trpc.library.videos.queryOptions({ libraryId }));
 	const jobsQuery = useQuery(
 		trpc.job.list.queryOptions({ libraryId, limit: 5 })
-	);
-	const embeddersQuery = useQuery(
-		trpc.embedder.list.queryOptions({ libraryId })
 	);
 
 	const deleteMutation = useMutation({
@@ -691,6 +970,7 @@ function LibraryDetailPage() {
 	const activeJob = jobsQuery.data?.find(
 		(j) => j.status === "pending" || j.status === "running"
 	);
+
 	return (
 		<div className="container mx-auto max-w-3xl space-y-6 px-4 py-6">
 			<div className="flex items-center justify-between">
@@ -698,74 +978,59 @@ function LibraryDetailPage() {
 					<h1 className="font-bold text-2xl">{library.name}</h1>
 					<p className="text-muted-foreground text-sm">{library.folderPath}</p>
 				</div>
-				<Button
-					disabled={deleteMutation.isPending}
-					onClick={() => deleteMutation.mutate()}
-					variant="destructive"
-				>
-					Delete
-				</Button>
-			</div>
-
-			<Card>
-				<CardHeader>
-					<div className="flex items-center justify-between">
-						<CardTitle>Embedders</CardTitle>
-						{!showAddForm && (
+				<AlertDialog>
+					<AlertDialogTrigger
+						render={
 							<Button
-								onClick={() => setShowAddForm(true)}
+								disabled={deleteMutation.isPending}
 								size="sm"
-								variant="outline"
+								variant="destructive"
 							>
-								Add Embedder
+								<Trash2 className="size-4" />
+								Delete
 							</Button>
-						)}
-					</div>
-				</CardHeader>
-				<CardContent>
-					<div className="flex flex-col gap-3">
-						{embeddersQuery.data?.map((emb) => (
-							<EmbedderCard embedder={emb} key={emb.id} libraryId={libraryId} />
-						))}
-						{embeddersQuery.data?.length === 0 && !showAddForm && (
-							<p className="text-muted-foreground text-sm">
-								No embedders configured. Add one to start indexing.
-							</p>
-						)}
-						{showAddForm && (
-							<AddEmbedderForm
-								libraryId={libraryId}
-								onDone={() => setShowAddForm(false)}
-							/>
-						)}
-					</div>
-				</CardContent>
-			</Card>
+						}
+					/>
+					<AlertDialogContent>
+						<AlertDialogHeader>
+							<AlertDialogTitle>Delete {library.name}?</AlertDialogTitle>
+							<AlertDialogDescription>
+								This will permanently delete the library, all videos, embedders,
+								and vector data.
+							</AlertDialogDescription>
+						</AlertDialogHeader>
+						<AlertDialogFooter>
+							<AlertDialogCancel>Cancel</AlertDialogCancel>
+							<AlertDialogAction
+								onClick={() => deleteMutation.mutate()}
+								variant="destructive"
+							>
+								Delete
+							</AlertDialogAction>
+						</AlertDialogFooter>
+					</AlertDialogContent>
+				</AlertDialog>
+			</div>
 
 			{activeJob && <IndexingProgress jobId={activeJob.id} />}
 
-			<Card>
-				<CardHeader>
-					<CardTitle>Videos ({library.videoCount})</CardTitle>
-				</CardHeader>
-				<CardContent>
-					{videosQuery.isLoading && (
-						<p className="text-muted-foreground text-sm">Loading videos...</p>
-					)}
-					{videosQuery.data?.length === 0 && (
-						<p className="text-muted-foreground text-sm">
-							No videos found. Start indexing to scan the folder.
-						</p>
-					)}
-					{videosQuery.data && videosQuery.data.length > 0 && (
-						<div className="divide-y">
-							{videosQuery.data.map((video) => (
-								<VideoRow key={video.id} video={video} />
-							))}
-						</div>
-					)}
-				</CardContent>
-			</Card>
+			<Tabs onValueChange={(v) => setTab(v)} value={tab}>
+				<TabsList>
+					<TabsTrigger value="videos">Videos</TabsTrigger>
+					<TabsTrigger value="embedders">Embedders</TabsTrigger>
+					<TabsTrigger value="search">Search</TabsTrigger>
+				</TabsList>
+				<Separator className="my-4" />
+				<TabsContent value="videos">
+					<VideosTab libraryId={libraryId} videoCount={library.videoCount} />
+				</TabsContent>
+				<TabsContent value="embedders">
+					<EmbeddersTab libraryId={libraryId} />
+				</TabsContent>
+				<TabsContent value="search">
+					<SearchTab libraryId={libraryId} />
+				</TabsContent>
+			</Tabs>
 		</div>
 	);
 }

@@ -9,26 +9,14 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as SearchRouteImport } from './routes/search'
 import { Route as LoginRouteImport } from './routes/login'
-import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LibrariesIndexRouteImport } from './routes/libraries.index'
 import { Route as LibrariesLibraryIdRouteImport } from './routes/libraries.$libraryId'
 
-const SearchRoute = SearchRouteImport.update({
-  id: '/search',
-  path: '/search',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DashboardRoute = DashboardRouteImport.update({
-  id: '/dashboard',
-  path: '/dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -49,86 +37,45 @@ const LibrariesLibraryIdRoute = LibrariesLibraryIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
-  '/search': typeof SearchRoute
   '/libraries/$libraryId': typeof LibrariesLibraryIdRoute
   '/libraries/': typeof LibrariesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
-  '/search': typeof SearchRoute
   '/libraries/$libraryId': typeof LibrariesLibraryIdRoute
   '/libraries': typeof LibrariesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
-  '/search': typeof SearchRoute
   '/libraries/$libraryId': typeof LibrariesLibraryIdRoute
   '/libraries/': typeof LibrariesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/dashboard'
-    | '/login'
-    | '/search'
-    | '/libraries/$libraryId'
-    | '/libraries/'
+  fullPaths: '/' | '/login' | '/libraries/$libraryId' | '/libraries/'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/dashboard'
-    | '/login'
-    | '/search'
-    | '/libraries/$libraryId'
-    | '/libraries'
-  id:
-    | '__root__'
-    | '/'
-    | '/dashboard'
-    | '/login'
-    | '/search'
-    | '/libraries/$libraryId'
-    | '/libraries/'
+  to: '/' | '/login' | '/libraries/$libraryId' | '/libraries'
+  id: '__root__' | '/' | '/login' | '/libraries/$libraryId' | '/libraries/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  DashboardRoute: typeof DashboardRoute
   LoginRoute: typeof LoginRoute
-  SearchRoute: typeof SearchRoute
   LibrariesLibraryIdRoute: typeof LibrariesLibraryIdRoute
   LibrariesIndexRoute: typeof LibrariesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/search': {
-      id: '/search'
-      path: '/search'
-      fullPath: '/search'
-      preLoaderRoute: typeof SearchRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/login': {
       id: '/login'
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/dashboard': {
-      id: '/dashboard'
-      path: '/dashboard'
-      fullPath: '/dashboard'
-      preLoaderRoute: typeof DashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -157,9 +104,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  DashboardRoute: DashboardRoute,
   LoginRoute: LoginRoute,
-  SearchRoute: SearchRoute,
   LibrariesLibraryIdRoute: LibrariesLibraryIdRoute,
   LibrariesIndexRoute: LibrariesIndexRoute,
 }

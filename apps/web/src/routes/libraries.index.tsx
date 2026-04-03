@@ -1,3 +1,4 @@
+import { Badge } from "@indecks/ui/components/badge";
 import { Button } from "@indecks/ui/components/button";
 import {
 	Card,
@@ -6,10 +7,19 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@indecks/ui/components/card";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+	DialogTitle,
+	DialogTrigger,
+} from "@indecks/ui/components/dialog";
+import { Field, FieldGroup, FieldLabel } from "@indecks/ui/components/field";
 import { Input } from "@indecks/ui/components/input";
-import { Label } from "@indecks/ui/components/label";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
+import { Plus } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -26,7 +36,19 @@ export const Route = createFileRoute("/libraries/")({
 	},
 });
 
-function CreateLibraryForm() {
+const statusVariant: Record<
+	string,
+	"default" | "secondary" | "destructive" | "outline"
+> = {
+	idle: "secondary",
+	scanning: "outline",
+	indexing: "outline",
+	ready: "default",
+	error: "destructive",
+};
+
+function CreateLibraryDialog() {
+	const [open, setOpen] = useState(false);
 	const [name, setName] = useState("");
 	const [folderPath, setFolderPath] = useState("");
 
@@ -34,9 +56,10 @@ function CreateLibraryForm() {
 		mutationFn: (input: { name: string; folderPath: string }) =>
 			trpcClient.library.create.mutate(input),
 		onSuccess: () => {
-			toast.success("Library created. Add an embedder to start indexing.");
+			toast.success("Library created");
 			setName("");
 			setFolderPath("");
+			setOpen(false);
 			queryClient.invalidateQueries({ queryKey: [["library", "list"]] });
 		},
 		onError: (err) => {
@@ -44,51 +67,62 @@ function CreateLibraryForm() {
 		},
 	});
 
-	const canSubmit = name && folderPath;
-
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle>Create Library</CardTitle>
-				<CardDescription>
-					Point to a local folder containing video files
-				</CardDescription>
-			</CardHeader>
-			<CardContent>
+		<Dialog onOpenChange={setOpen} open={open}>
+			<DialogTrigger
+				render={
+					<Button size="sm">
+						<Plus className="size-4" />
+						New Library
+					</Button>
+				}
+			/>
+			<DialogContent>
+				<DialogHeader>
+					<DialogTitle>Create Library</DialogTitle>
+					<DialogDescription>
+						Point to a local folder containing video files.
+					</DialogDescription>
+				</DialogHeader>
 				<form
-					className="flex flex-col gap-4"
 					onSubmit={(e) => {
 						e.preventDefault();
-						createMutation.mutate({ name, folderPath });
+						if (name.trim() && folderPath.trim()) {
+							createMutation.mutate({ name, folderPath });
+						}
 					}}
 				>
-					<div className="flex flex-col gap-2">
-						<Label htmlFor="name">Name</Label>
-						<Input
-							id="name"
-							onChange={(e) => setName(e.target.value)}
-							placeholder="My Videos"
-							value={name}
-						/>
-					</div>
-					<div className="flex flex-col gap-2">
-						<Label htmlFor="folderPath">Folder Path</Label>
-						<Input
-							id="folderPath"
-							onChange={(e) => setFolderPath(e.target.value)}
-							placeholder="/path/to/videos"
-							value={folderPath}
-						/>
-					</div>
-					<Button
-						disabled={!canSubmit || createMutation.isPending}
-						type="submit"
-					>
-						{createMutation.isPending ? "Creating..." : "Create"}
-					</Button>
+					<FieldGroup>
+						<Field>
+							<FieldLabel htmlFor="lib-name">Name</FieldLabel>
+							<Input
+								id="lib-name"
+								onChange={(e) => setName(e.target.value)}
+								placeholder="My Videos"
+								value={name}
+							/>
+						</Field>
+						<Field>
+							<FieldLabel htmlFor="lib-folder">Folder Path</FieldLabel>
+							<Input
+								id="lib-folder"
+								onChange={(e) => setFolderPath(e.target.value)}
+								placeholder="/path/to/videos"
+								value={folderPath}
+							/>
+						</Field>
+						<Button
+							disabled={
+								!(name.trim() && folderPath.trim()) || createMutation.isPending
+							}
+							type="submit"
+						>
+							{createMutation.isPending ? "Creating..." : "Create"}
+						</Button>
+					</FieldGroup>
 				</form>
-			</CardContent>
-		</Card>
+			</DialogContent>
+		</Dialog>
 	);
 }
 
@@ -103,28 +137,15 @@ function LibraryCard({
 		videoCount: number;
 	};
 }) {
-	const statusColors: Record<string, string> = {
-		idle: "bg-gray-500",
-		scanning: "bg-yellow-500",
-		indexing: "bg-blue-500",
-		ready: "bg-green-500",
-		error: "bg-red-500",
-	};
-
 	return (
 		<Link params={{ libraryId: library.id }} to="/libraries/$libraryId">
 			<Card className="transition-colors hover:border-foreground/20">
 				<CardHeader>
 					<div className="flex items-center justify-between">
 						<CardTitle>{library.name}</CardTitle>
-						<div className="flex items-center gap-2">
-							<div
-								className={`h-2 w-2 rounded-full ${statusColors[library.status] ?? "bg-gray-500"}`}
-							/>
-							<span className="text-muted-foreground text-xs">
-								{library.status}
-							</span>
-						</div>
+						<Badge variant={statusVariant[library.status] ?? "secondary"}>
+							{library.status}
+						</Badge>
 					</div>
 					<CardDescription className="truncate">
 						{library.folderPath}
@@ -145,12 +166,13 @@ function LibrariesPage() {
 
 	return (
 		<div className="container mx-auto max-w-3xl space-y-6 px-4 py-6">
-			<h1 className="font-bold text-2xl">Libraries</h1>
-
-			<CreateLibraryForm />
+			<div className="flex items-center justify-between">
+				<h1 className="font-bold text-2xl">Libraries</h1>
+				<CreateLibraryDialog />
+			</div>
 
 			{librariesQuery.isLoading && (
-				<p className="text-muted-foreground">Loading...</p>
+				<p className="text-muted-foreground text-sm">Loading...</p>
 			)}
 
 			{librariesQuery.data && librariesQuery.data.length > 0 && (
@@ -162,8 +184,8 @@ function LibrariesPage() {
 			)}
 
 			{librariesQuery.data?.length === 0 && (
-				<p className="text-muted-foreground">
-					No libraries yet. Create one above.
+				<p className="text-muted-foreground text-sm">
+					No libraries yet. Create one to get started.
 				</p>
 			)}
 		</div>
