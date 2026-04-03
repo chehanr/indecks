@@ -5,85 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1775121308618,
-      "tag": "0000_low_alex_power",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1775134403791,
-      "tag": "0001_loving_jocasta",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1775138511885,
-      "tag": "0002_thick_stardust",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1775138756739,
-      "tag": "0003_spicy_omega_flight",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1775140486812,
-      "tag": "0004_short_falcon",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1775140926805,
-      "tag": "0005_busy_purifiers",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1775179143568,
-      "tag": "0006_workable_quentin_quire",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "6",
-      "when": 1775191278318,
-      "tag": "0007_married_puma",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "6",
-      "when": 1775280000000,
-      "tag": "0008_rename_embedder_to_indexer",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "6",
-      "when": 1775370000000,
-      "tag": "0009_add_video_file_hash",
-      "breakpoints": true
-    },
-    {
-      "idx": 10,
-      "version": "6",
-      "when": 1775211485012,
-      "tag": "0010_cheerful_jamie_braddock",
-      "breakpoints": true
-    },
-    {
-      "idx": 11,
-      "version": "6",
-      "when": 1775460000000,
-      "tag": "0011_fixup_chunk_indexer_id",
+      "when": 1775224364292,
+      "tag": "0000_old_stingray",
       "breakpoints": true
     }
   ]

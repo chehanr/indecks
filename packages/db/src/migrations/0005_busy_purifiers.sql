@@ -1,1 +1,0 @@
-ALTER TABLE `library` ADD `downscale_fps` integer DEFAULT 5 NOT NULL;

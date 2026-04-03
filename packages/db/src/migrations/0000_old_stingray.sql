@@ -54,24 +54,48 @@ CREATE INDEX `verification_identifier_idx` ON `verification` (`identifier`);--> 
 CREATE TABLE `chunk` (
 	`id` text PRIMARY KEY NOT NULL,
 	`video_id` text NOT NULL,
+	`indexer_id` text NOT NULL,
 	`start_time` real NOT NULL,
 	`end_time` real NOT NULL,
 	`is_still_frame` integer DEFAULT false NOT NULL,
 	`embedding_status` text DEFAULT 'pending' NOT NULL,
 	`created_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
-	FOREIGN KEY (`video_id`) REFERENCES `video`(`id`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`video_id`) REFERENCES `video`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`indexer_id`) REFERENCES `indexer`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
 CREATE INDEX `chunk_video_id_idx` ON `chunk` (`video_id`);--> statement-breakpoint
+CREATE INDEX `chunk_indexer_id_idx` ON `chunk` (`indexer_id`);--> statement-breakpoint
 CREATE INDEX `chunk_embedding_status_idx` ON `chunk` (`embedding_status`);--> statement-breakpoint
+CREATE TABLE `indexer` (
+	`id` text PRIMARY KEY NOT NULL,
+	`library_id` text NOT NULL,
+	`name` text NOT NULL,
+	`base_url` text NOT NULL,
+	`api_key` text,
+	`model` text NOT NULL,
+	`dimensions` integer NOT NULL,
+	`instruction` text,
+	`is_default` integer DEFAULT false NOT NULL,
+	`chunk_duration` integer DEFAULT 30 NOT NULL,
+	`chunk_overlap` integer DEFAULT 5 NOT NULL,
+	`downscale_fps` integer DEFAULT 5 NOT NULL,
+	`created_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
+	`updated_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
+	FOREIGN KEY (`library_id`) REFERENCES `library`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `indexer_library_id_idx` ON `indexer` (`library_id`);--> statement-breakpoint
 CREATE TABLE `job` (
 	`id` text PRIMARY KEY NOT NULL,
 	`type` text NOT NULL,
 	`status` text DEFAULT 'pending' NOT NULL,
 	`library_id` text,
 	`video_id` text,
+	`indexer_id` text,
 	`progress` integer DEFAULT 0 NOT NULL,
 	`progress_message` text,
+	`retry_count` integer DEFAULT 0 NOT NULL,
 	`error_message` text,
 	`started_at` integer,
 	`completed_at` integer,
@@ -93,15 +117,6 @@ CREATE TABLE `library` (
 );
 --> statement-breakpoint
 CREATE INDEX `library_status_idx` ON `library` (`status`);--> statement-breakpoint
-CREATE TABLE `settings` (
-	`id` text PRIMARY KEY NOT NULL,
-	`embedding_base_url` text,
-	`embedding_api_key` text,
-	`embedding_model` text,
-	`embedding_dimensions` integer DEFAULT 768 NOT NULL,
-	`updated_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL
-);
---> statement-breakpoint
 CREATE TABLE `video` (
 	`id` text PRIMARY KEY NOT NULL,
 	`library_id` text NOT NULL,
@@ -110,6 +125,7 @@ CREATE TABLE `video` (
 	`file_size` integer,
 	`duration` real,
 	`status` text DEFAULT 'pending' NOT NULL,
+	`file_hash` text,
 	`error_message` text,
 	`created_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,
 	`updated_at` integer DEFAULT (cast(unixepoch('subsecond') * 1000 as integer)) NOT NULL,

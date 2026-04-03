@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6dfd84d7-6962-4906-8e5b-347c9e209737",
+  "id": "576f8e0d-10df-435e-9d66-0cad39c89898",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -103,7 +103,9 @@
       "indexes": {
         "account_userId_idx": {
           "name": "account_userId_idx",
-          "columns": ["user_id"],
+          "columns": [
+            "user_id"
+          ],
           "isUnique": false
         }
       },
@@ -112,8 +114,12 @@
           "name": "account_user_id_user_id_fk",
           "tableFrom": "account",
           "tableTo": "user",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -186,12 +192,16 @@
       "indexes": {
         "session_token_unique": {
           "name": "session_token_unique",
-          "columns": ["token"],
+          "columns": [
+            "token"
+          ],
           "isUnique": true
         },
         "session_userId_idx": {
           "name": "session_userId_idx",
-          "columns": ["user_id"],
+          "columns": [
+            "user_id"
+          ],
           "isUnique": false
         }
       },
@@ -200,8 +210,12 @@
           "name": "session_user_id_user_id_fk",
           "tableFrom": "session",
           "tableTo": "user",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -269,7 +283,9 @@
       "indexes": {
         "user_email_unique": {
           "name": "user_email_unique",
-          "columns": ["email"],
+          "columns": [
+            "email"
+          ],
           "isUnique": true
         }
       },
@@ -329,7 +345,9 @@
       "indexes": {
         "verification_identifier_idx": {
           "name": "verification_identifier_idx",
-          "columns": ["identifier"],
+          "columns": [
+            "identifier"
+          ],
           "isUnique": false
         }
       },
@@ -350,6 +368,13 @@
         },
         "video_id": {
           "name": "video_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "indexer_id": {
+          "name": "indexer_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -397,12 +422,23 @@
       "indexes": {
         "chunk_video_id_idx": {
           "name": "chunk_video_id_idx",
-          "columns": ["video_id"],
+          "columns": [
+            "video_id"
+          ],
+          "isUnique": false
+        },
+        "chunk_indexer_id_idx": {
+          "name": "chunk_indexer_id_idx",
+          "columns": [
+            "indexer_id"
+          ],
           "isUnique": false
         },
         "chunk_embedding_status_idx": {
           "name": "chunk_embedding_status_idx",
-          "columns": ["embedding_status"],
+          "columns": [
+            "embedding_status"
+          ],
           "isUnique": false
         }
       },
@@ -411,8 +447,161 @@
           "name": "chunk_video_id_video_id_fk",
           "tableFrom": "chunk",
           "tableTo": "video",
-          "columnsFrom": ["video_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "video_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "chunk_indexer_id_indexer_id_fk": {
+          "name": "chunk_indexer_id_indexer_id_fk",
+          "tableFrom": "chunk",
+          "tableTo": "indexer",
+          "columnsFrom": [
+            "indexer_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "indexer": {
+      "name": "indexer",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "library_id": {
+          "name": "library_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "base_url": {
+          "name": "base_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "api_key": {
+          "name": "api_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "dimensions": {
+          "name": "dimensions",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "instruction": {
+          "name": "instruction",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "is_default": {
+          "name": "is_default",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "chunk_duration": {
+          "name": "chunk_duration",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 30
+        },
+        "chunk_overlap": {
+          "name": "chunk_overlap",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 5
+        },
+        "downscale_fps": {
+          "name": "downscale_fps",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 5
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(cast(unixepoch('subsecond') * 1000 as integer))"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(cast(unixepoch('subsecond') * 1000 as integer))"
+        }
+      },
+      "indexes": {
+        "indexer_library_id_idx": {
+          "name": "indexer_library_id_idx",
+          "columns": [
+            "library_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "indexer_library_id_library_id_fk": {
+          "name": "indexer_library_id_library_id_fk",
+          "tableFrom": "indexer",
+          "tableTo": "library",
+          "columnsFrom": [
+            "library_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -460,6 +649,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "indexer_id": {
+          "name": "indexer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "progress": {
           "name": "progress",
           "type": "integer",
@@ -474,6 +670,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "retry_count": {
+          "name": "retry_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
         },
         "error_message": {
           "name": "error_message",
@@ -516,17 +720,24 @@
       "indexes": {
         "job_status_idx": {
           "name": "job_status_idx",
-          "columns": ["status"],
+          "columns": [
+            "status"
+          ],
           "isUnique": false
         },
         "job_library_id_idx": {
           "name": "job_library_id_idx",
-          "columns": ["library_id"],
+          "columns": [
+            "library_id"
+          ],
           "isUnique": false
         },
         "job_type_status_idx": {
           "name": "job_type_status_idx",
-          "columns": ["type", "status"],
+          "columns": [
+            "type",
+            "status"
+          ],
           "isUnique": false
         }
       },
@@ -595,64 +806,12 @@
       "indexes": {
         "library_status_idx": {
           "name": "library_status_idx",
-          "columns": ["status"],
+          "columns": [
+            "status"
+          ],
           "isUnique": false
         }
       },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "settings": {
-      "name": "settings",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "embedding_base_url": {
-          "name": "embedding_base_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "embedding_api_key": {
-          "name": "embedding_api_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "embedding_model": {
-          "name": "embedding_model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "embedding_dimensions": {
-          "name": "embedding_dimensions",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 768
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(cast(unixepoch('subsecond') * 1000 as integer))"
-        }
-      },
-      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -711,6 +870,13 @@
           "autoincrement": false,
           "default": "'pending'"
         },
+        "file_hash": {
+          "name": "file_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "error_message": {
           "name": "error_message",
           "type": "text",
@@ -738,12 +904,16 @@
       "indexes": {
         "video_library_id_idx": {
           "name": "video_library_id_idx",
-          "columns": ["library_id"],
+          "columns": [
+            "library_id"
+          ],
           "isUnique": false
         },
         "video_status_idx": {
           "name": "video_status_idx",
-          "columns": ["status"],
+          "columns": [
+            "status"
+          ],
           "isUnique": false
         }
       },
@@ -752,8 +922,12 @@
           "name": "video_library_id_library_id_fk",
           "tableFrom": "video",
           "tableTo": "library",
-          "columnsFrom": ["library_id"],
-          "columnsTo": ["id"],
+          "columnsFrom": [
+            "library_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
