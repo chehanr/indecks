@@ -47,9 +47,10 @@ COPY --from=prod-deps /app/apps/server/node_modules ./apps/server/node_modules
 COPY --from=prod-deps /app/packages/db/node_modules ./packages/db/node_modules
 COPY --from=prod-deps /app/packages/vector/node_modules ./packages/vector/node_modules
 RUN mkdir -p node_modules/@libsql && \
-    ln -sf ../.bun/node_modules/@libsql/linux-arm64-musl node_modules/@libsql/linux-arm64-musl && \
-    ln -sf ../.bun/node_modules/@libsql/linux-arm64-gnu node_modules/@libsql/linux-arm64-gnu; \
-    true
+    for arch in linux-arm64-musl linux-arm64-gnu linux-x64-musl linux-x64-gnu; do \
+      [ -d node_modules/.bun/node_modules/@libsql/$arch ] && \
+        ln -sf ../.bun/node_modules/@libsql/$arch node_modules/@libsql/$arch; \
+    done; true
 COPY --from=build /app/apps/server/dist ./apps/server/dist
 COPY --from=build /app/apps/web/dist ./apps/server/public
 COPY --from=build /app/packages/db/src/migrations ./migrations
