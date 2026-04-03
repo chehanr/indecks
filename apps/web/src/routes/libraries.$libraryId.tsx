@@ -129,8 +129,88 @@ function VideoStatusBadge({ status }: { status: string }) {
 	);
 }
 
+function IndexVideoDialog({
+	videoId,
+	embedders,
+}: {
+	videoId: string;
+	embedders: {
+		id: string;
+		name: string;
+		model: string;
+		dimensions: number;
+		isDefault: boolean;
+	}[];
+}) {
+	const [open, setOpen] = useState(false);
+	const [selectedId, setSelectedId] = useState("");
+
+	const indexMutation = useMutation({
+		mutationFn: () =>
+			trpcClient.library.reindexVideo.mutate({
+				videoId,
+				embedderId: selectedId,
+			}),
+		onSuccess: () => {
+			toast.success("Indexing started");
+			queryClient.invalidateQueries({ queryKey: [["job", "list"]] });
+			queryClient.invalidateQueries({ queryKey: [["library", "videos"]] });
+			setOpen(false);
+		},
+		onError: (err) => {
+			toast.error(err.message);
+		},
+	});
+
+	const handleOpen = (next: boolean) => {
+		setOpen(next);
+		if (next) {
+			const def = embedders.find((e) => e.isDefault);
+			setSelectedId(def?.id ?? embedders[0]?.id ?? "");
+		}
+	};
+
+	return (
+		<Dialog onOpenChange={handleOpen} open={open}>
+			<DialogTrigger
+				render={
+					<Button size="xs" variant="outline">
+						Index
+					</Button>
+				}
+			/>
+			<DialogContent>
+				<DialogHeader>
+					<DialogTitle>Index Video</DialogTitle>
+				</DialogHeader>
+				<div className="flex flex-col gap-3">
+					<NativeSelect
+						className="w-full"
+						onChange={(e) => setSelectedId(e.target.value)}
+						value={selectedId}
+					>
+						{embedders.map((emb) => (
+							<NativeSelectOption key={emb.id} value={emb.id}>
+								{emb.name} ({emb.model}, {emb.dimensions}d)
+								{emb.isDefault ? " — default" : ""}
+							</NativeSelectOption>
+						))}
+					</NativeSelect>
+					<Button
+						disabled={!selectedId || indexMutation.isPending}
+						onClick={() => indexMutation.mutate()}
+					>
+						{indexMutation.isPending ? "Starting..." : "Start Indexing"}
+					</Button>
+				</div>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
 function VideoRow({
 	video,
+	embedders,
 }: {
 	video: {
 		id: string;
@@ -139,6 +219,13 @@ function VideoRow({
 		status: string;
 		indexedBy: string[];
 	};
+	embedders: {
+		id: string;
+		name: string;
+		model: string;
+		dimensions: number;
+		isDefault: boolean;
+	}[];
 }) {
 	return (
 		<div className="flex items-center justify-between py-2">
@@ -157,7 +244,12 @@ function VideoRow({
 					)}
 				</div>
 			</div>
-			<VideoStatusBadge status={video.status} />
+			<div className="ml-2 flex items-center gap-2">
+				{embedders.length > 0 && (
+					<IndexVideoDialog embedders={embedders} videoId={video.id} />
+				)}
+				<VideoStatusBadge status={video.status} />
+			</div>
 		</div>
 	);
 }
@@ -170,6 +262,16 @@ function VideosTab({
 	videoCount: number;
 }) {
 	const videosQuery = useQuery(trpc.library.videos.queryOptions({ libraryId }));
+	const embeddersQuery = useQuery(
+		trpc.embedder.list.queryOptions({ libraryId })
+	);
+	const embedders = (embeddersQuery.data ?? []).map((e) => ({
+		id: e.id,
+		name: e.name,
+		model: e.model,
+		dimensions: e.dimensions,
+		isDefault: e.isDefault,
+	}));
 
 	return (
 		<div className="space-y-4">
@@ -187,7 +289,7 @@ function VideosTab({
 			{videosQuery.data && videosQuery.data.length > 0 && (
 				<div className="divide-y">
 					{videosQuery.data.map((video) => (
-						<VideoRow key={video.id} video={video} />
+						<VideoRow embedders={embedders} key={video.id} video={video} />
 					))}
 				</div>
 			)}
