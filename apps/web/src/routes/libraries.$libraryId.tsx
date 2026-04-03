@@ -44,7 +44,7 @@ import {
 } from "@indecks/ui/components/tabs";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
-import { Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { parseAsString, useQueryState } from "nuqs";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -106,20 +106,47 @@ function IndexingProgress({
 		return () => sub.unsubscribe();
 	}, [jobId, onDone]);
 
+	const isActive = state.status === "running" || state.status === "pending";
+
+	const handleCancel = () => {
+		trpcClient.job.cancel.mutate({ id: jobId }).then(() => {
+			setState((prev) => ({ ...prev, status: "cancelled" }));
+			queryClient.invalidateQueries({ queryKey: [["library", "videos"]] });
+			queryClient.invalidateQueries({ queryKey: [["library", "get"]] });
+			setTimeout(() => onDone?.(), 3000);
+		});
+	};
+
 	let statusLabel = "Indexing...";
 	if (state.status === "completed") {
 		statusLabel = "Indexing complete";
 	} else if (state.status === "failed") {
 		statusLabel = "Indexing failed";
+	} else if (state.status === "cancelled") {
+		statusLabel = "Cancelled";
 	}
 
 	return (
 		<Card>
 			<CardContent className="py-4">
-				<Progress value={state.progress}>
-					<ProgressLabel>{statusLabel}</ProgressLabel>
-					<ProgressValue />
-				</Progress>
+				<div className="flex items-center gap-2">
+					<div className="flex-1">
+						<Progress value={state.progress}>
+							<ProgressLabel>{statusLabel}</ProgressLabel>
+							<ProgressValue />
+						</Progress>
+					</div>
+					{isActive && (
+						<Button
+							className="h-6 w-6 shrink-0"
+							onClick={handleCancel}
+							size="icon"
+							variant="ghost"
+						>
+							<X className="h-4 w-4" />
+						</Button>
+					)}
+				</div>
 				{state.progressMessage && (
 					<p className="mt-2 text-muted-foreground text-xs">
 						{state.progressMessage}
