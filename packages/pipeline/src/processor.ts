@@ -10,7 +10,7 @@ import { library as libraryTable } from "@indecks/db/schema/library";
 import { video as videoTable } from "@indecks/db/schema/video";
 import type { VectorDb, VectorDbManagerShape } from "@indecks/vector";
 import { and, eq, inArray } from "drizzle-orm";
-import { Context, Effect, Layer } from "effect";
+import { Context, Duration, Effect, Layer } from "effect";
 import { nanoid } from "nanoid";
 
 import type { EmbedConfig } from "./embedder";
@@ -410,8 +410,32 @@ export const ProcessorServiceLive = Layer.effect(
 								pct,
 								`Embedded chunk ${processed}/${totalChunks}`
 							);
-						}),
-					{ concurrency: 1 }
+						}).pipe(
+							Effect.timeout(Duration.minutes(5)),
+							Effect.catchTag("TimeoutException", () =>
+								Effect.gen(function* () {
+									const chunkId = makeChunkId(
+										vid.id,
+										ctx.indexerId,
+										chunkInfo.startTime
+									);
+									yield* Effect.promise(() =>
+										db
+											.update(chunkTable)
+											.set({ embeddingStatus: "error" })
+											.where(eq(chunkTable.id, chunkId))
+									);
+									processed++;
+									const pct = Math.round((processed / totalChunks) * 100);
+									yield* progress(
+										onProgress,
+										pct,
+										`Chunk ${processed}/${totalChunks} (timed out)`
+									);
+								})
+							)
+						),
+					{ concurrency: 4 }
 				);
 
 				yield* ffmpeg.cleanupChunks(chunks);

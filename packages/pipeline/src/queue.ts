@@ -5,7 +5,7 @@ import { library as libraryTable } from "@indecks/db/schema/library";
 import { video as videoTable } from "@indecks/db/schema/video";
 import type { VectorDbManagerShape } from "@indecks/vector";
 import { and, eq, inArray, or } from "drizzle-orm";
-import { Context, Duration, Effect, type Fiber, Layer, Schedule } from "effect";
+import { Context, Effect, type Fiber, Layer, Schedule } from "effect";
 import { nanoid } from "nanoid";
 
 import {
@@ -471,7 +471,6 @@ export const JobQueueServiceLive = Layer.effect(
 
 				const runJob = (jobRow: typeof jobTable.$inferSelect) =>
 					processJob(jobRow).pipe(
-						Effect.timeout(Duration.minutes(30)),
 						Effect.tap(() => completeJob(db, jobRow.id)),
 						Effect.catchIf(
 							(err): err is JobCancelledError =>

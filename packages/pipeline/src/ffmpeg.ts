@@ -277,18 +277,23 @@ export const FFmpegServiceLive = Layer.effect(
 					const duration = durationResult.value;
 
 					const times = [duration * 0.25, duration * 0.5, duration * 0.75];
-					for (const [idx, t] of times.entries()) {
-						yield* runExitCode(executor, "ffmpeg", [
-							"-y",
-							"-ss",
-							String(t),
-							"-i",
-							chunkPath,
-							"-frames:v",
-							"1",
-							join(tmpDir, `frame_${String(idx).padStart(3, "0")}.jpg`),
-						]).pipe(Effect.ignore);
-					}
+
+					// Extract frames in parallel
+					yield* Effect.forEach(
+						times,
+						(t, idx) =>
+							runExitCode(executor, "ffmpeg", [
+								"-y",
+								"-ss",
+								String(t),
+								"-i",
+								chunkPath,
+								"-frames:v",
+								"1",
+								join(tmpDir, `frame_${String(idx).padStart(3, "0")}.jpg`),
+							]).pipe(Effect.ignore),
+						{ concurrency: 3 }
+					);
 
 					const sizes: number[] = [];
 					for (let i = 0; i < 3; i++) {
