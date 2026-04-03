@@ -20,6 +20,12 @@ import {
 	DialogTrigger,
 } from "@indecks/ui/components/dialog";
 import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@indecks/ui/components/dropdown-menu";
+import {
 	Field,
 	FieldGroup,
 	FieldLabel,
@@ -824,10 +830,11 @@ function IndexerCard({
 	});
 
 	const indexMutation = useMutation({
-		mutationFn: () =>
+		mutationFn: (force?: boolean) =>
 			trpcClient.library.startIndexing.mutate({
 				id: libraryId,
 				indexerId: indexer.id,
+				force,
 			}),
 		onSuccess: (data) => {
 			toast.success(`Indexing started with ${indexer.name}`);
@@ -856,14 +863,25 @@ function IndexerCard({
 				</p>
 			</div>
 			<div className="ml-2 flex items-center gap-1">
-				<Button
-					disabled={indexMutation.isPending}
-					onClick={() => indexMutation.mutate()}
-					size="sm"
-					variant="outline"
-				>
-					Index
-				</Button>
+				<DropdownMenu>
+					<DropdownMenuTrigger>
+						<Button
+							disabled={indexMutation.isPending}
+							size="sm"
+							variant="outline"
+						>
+							Index
+						</Button>
+					</DropdownMenuTrigger>
+					<DropdownMenuContent align="end">
+						<DropdownMenuItem onClick={() => indexMutation.mutate(false)}>
+							Index new
+						</DropdownMenuItem>
+						<DropdownMenuItem onClick={() => indexMutation.mutate(true)}>
+							Force re-index all
+						</DropdownMenuItem>
+					</DropdownMenuContent>
+				</DropdownMenu>
 				<EditIndexerDialog indexer={indexer} />
 				{!indexer.isDefault && (
 					<Button

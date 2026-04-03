@@ -12,7 +12,7 @@ import {
 	VideoNotFoundError,
 } from "@indecks/pipeline/errors";
 import { VectorDbManagerService } from "@indecks/vector";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -155,12 +155,20 @@ export const libraryRouter = router({
 		),
 
 	startIndexing: protectedProcedure
-		.input(z.object({ id: z.string(), indexerId: z.string().min(1) }))
+		.input(
+			z.object({
+				id: z.string(),
+				indexerId: z.string().min(1),
+				force: z.boolean().optional(),
+			})
+		)
 		.mutation(({ ctx, input }) =>
 			runEffect(
 				ctx.runtime,
 				Effect.gen(function* () {
 					const db = yield* DbService;
+					const vectorDbManager = yield* VectorDbManagerService;
+
 					const lib = yield* Effect.promise(() =>
 						db
 							.select()
@@ -187,6 +195,36 @@ export const libraryRouter = router({
 						return yield* new IndexerNotFoundError({
 							indexerId: input.indexerId,
 						});
+					}
+
+					if (input.force) {
+						yield* Effect.promise(() =>
+							db
+								.delete(chunkTable)
+								.where(
+									and(
+										eq(chunkTable.indexerId, input.indexerId),
+										inArray(
+											chunkTable.videoId,
+											db
+												.select({ id: videoTable.id })
+												.from(videoTable)
+												.where(eq(videoTable.libraryId, input.id))
+										)
+									)
+								)
+						);
+
+						yield* vectorDbManager
+							.remove(input.id, input.indexerId)
+							.pipe(Effect.orDie);
+
+						yield* Effect.promise(() =>
+							db
+								.update(videoTable)
+								.set({ status: "pending", errorMessage: null })
+								.where(eq(videoTable.libraryId, input.id))
+						);
 					}
 
 					const jobId = nanoid();
