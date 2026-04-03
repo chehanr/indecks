@@ -4,13 +4,17 @@ import { resolve } from "node:path";
 
 import { trpcServer } from "@hono/trpc-server";
 import { createTrpcContext, makeAppLayer } from "@indecks/api/context";
+import { jobEvents } from "@indecks/api/events";
 import { appRouter } from "@indecks/api/routers/index";
 import { AuthService } from "@indecks/auth";
 import { DbService } from "@indecks/db";
 import { embedder as embedderTable } from "@indecks/db/schema/embedder";
 import { library as libraryTable } from "@indecks/db/schema/library";
 import { env } from "@indecks/env/server";
-import { JobQueueService } from "@indecks/pipeline/queue";
+import {
+	JobQueueService,
+	setJobProgressCallback,
+} from "@indecks/pipeline/queue";
 import { VectorDbManagerService } from "@indecks/vector";
 import { Effect, Fiber, ManagedRuntime } from "effect";
 import { Hono } from "hono";
@@ -51,6 +55,18 @@ await appRuntime.runPromise(
 			}
 		}
 	})
+);
+
+setJobProgressCallback(
+	(jobId, status, progress, progressMessage, errorMessage) => {
+		jobEvents.emit("progress", {
+			jobId,
+			status,
+			progress,
+			progressMessage,
+			errorMessage,
+		});
+	}
 );
 
 const workerFiber = await appRuntime.runPromise(

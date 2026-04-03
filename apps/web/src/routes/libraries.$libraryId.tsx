@@ -46,7 +46,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { parseAsString, useQueryState } from "nuqs";
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { authClient } from "@/lib/auth-client";
@@ -64,61 +64,69 @@ export const Route = createFileRoute("/libraries/$libraryId")({
 
 // --- Indexing Progress ---
 
-function IndexingProgress({ jobId }: { jobId: string }) {
-	const [wasActive, setWasActive] = useState(true);
-
-	const jobQuery = useQuery({
-		...trpc.job.get.queryOptions({ id: jobId }),
-		refetchInterval: (query) => {
-			const status = query.state.data?.status;
-			if (
-				status === "completed" ||
-				status === "failed" ||
-				status === "cancelled"
-			) {
-				return false;
-			}
-			return 2000;
-		},
+function IndexingProgress({
+	jobId,
+	onDone,
+}: {
+	jobId: string;
+	onDone?: () => void;
+}) {
+	const [state, setState] = useState({
+		status: "running",
+		progress: 0,
+		progressMessage: null as string | null,
+		errorMessage: null as string | null,
 	});
 
-	const job = jobQuery.data;
-	const isDone =
-		job?.status === "completed" ||
-		job?.status === "failed" ||
-		job?.status === "cancelled";
-
-	if (wasActive && isDone) {
-		setWasActive(false);
-		queryClient.invalidateQueries({ queryKey: [["library", "videos"]] });
-		queryClient.invalidateQueries({ queryKey: [["library", "get"]] });
-	}
-
-	if (!job) {
-		return null;
-	}
+	useEffect(() => {
+		const sub = trpcClient.job.onProgress.subscribe(
+			{ jobId },
+			{
+				onData(event) {
+					setState({
+						status: event.status,
+						progress: event.progress,
+						progressMessage: event.progressMessage,
+						errorMessage: event.errorMessage,
+					});
+					if (
+						event.status === "completed" ||
+						event.status === "failed" ||
+						event.status === "cancelled"
+					) {
+						queryClient.invalidateQueries({
+							queryKey: [["library", "videos"]],
+						});
+						queryClient.invalidateQueries({ queryKey: [["library", "get"]] });
+						setTimeout(() => onDone?.(), 3000);
+					}
+				},
+			}
+		);
+		return () => sub.unsubscribe();
+	}, [jobId, onDone]);
 
 	let statusLabel = "Indexing...";
-	if (job.status === "completed") {
+	if (state.status === "completed") {
 		statusLabel = "Indexing complete";
-	} else if (job.status === "failed") {
+	} else if (state.status === "failed") {
 		statusLabel = "Indexing failed";
 	}
 
 	return (
 		<Card>
 			<CardContent className="py-4">
-				<Progress value={job.progress}>
+				<Progress value={state.progress}>
 					<ProgressLabel>{statusLabel}</ProgressLabel>
 					<ProgressValue />
 				</Progress>
-				{job.progressMessage && (
+				{state.progressMessage && (
 					<p className="mt-2 text-muted-foreground text-xs">
-						{job.progressMessage}
+						{state.progressMessage}
 					</p>
 				)}
-				{job.errorMessage && (
-					<p className="mt-2 text-destructive text-xs">{job.errorMessage}</p>
+				{state.errorMessage && (
+					<p className="mt-2 text-destructive text-xs">{state.errorMessage}</p>
 				)}
 			</CardContent>
 		</Card>
@@ -1082,23 +1090,15 @@ function LibraryDetailPage() {
 	);
 	const [trackedJobIds, setTrackedJobIds] = useState<string[]>([]);
 
-	const jobsQuery = useQuery({
-		...trpc.job.list.queryOptions({ libraryId, limit: 10 }),
-		refetchInterval: (query) => {
-			const jobs = query.state.data;
-			const hasActive = jobs?.some(
-				(j) => j.status === "pending" || j.status === "running"
-			);
-			return hasActive ? 3000 : false;
-		},
-	});
-
-	const trackJob = (jobId: string) => {
+	const trackJob = useCallback((jobId: string) => {
 		setTrackedJobIds((prev) =>
 			prev.includes(jobId) ? prev : [...prev, jobId]
 		);
-		queryClient.invalidateQueries({ queryKey: [["job", "list"]] });
-	};
+	}, []);
+
+	const removeJob = useCallback((jobId: string) => {
+		setTrackedJobIds((prev) => prev.filter((id) => id !== jobId));
+	}, []);
 
 	const deleteMutation = useMutation({
 		mutationFn: () => trpcClient.library.delete.mutate({ id: libraryId }),
@@ -1127,17 +1127,6 @@ function LibraryDetailPage() {
 			</div>
 		);
 	}
-
-	const activeJobs =
-		jobsQuery.data?.filter(
-			(j) => j.status === "pending" || j.status === "running"
-		) ?? [];
-
-	const activeJobIds = new Set(activeJobs.map((j) => j.id));
-	const allJobIds = [
-		...activeJobs.map((j) => j.id),
-		...trackedJobIds.filter((id) => !activeJobIds.has(id)),
-	];
 
 	return (
 		<div className="container mx-auto max-w-3xl space-y-6 px-4 py-6">
@@ -1180,10 +1169,14 @@ function LibraryDetailPage() {
 				</AlertDialog>
 			</div>
 
-			{allJobIds.length > 0 && (
+			{trackedJobIds.length > 0 && (
 				<div className="space-y-2">
-					{allJobIds.map((jobId) => (
-						<IndexingProgress jobId={jobId} key={jobId} />
+					{trackedJobIds.map((jobId) => (
+						<IndexingProgress
+							jobId={jobId}
+							key={jobId}
+							onDone={() => removeJob(jobId)}
+						/>
 					))}
 				</div>
 			)}

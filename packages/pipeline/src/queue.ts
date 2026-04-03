@@ -9,6 +9,20 @@ import { Context, Effect, type Fiber, Layer, Schedule } from "effect";
 import { JobMissingFieldError, UnknownJobTypeError } from "./errors";
 import { ProcessorService } from "./processor";
 
+export type JobProgressCallback = (
+	jobId: string,
+	status: string,
+	progress: number,
+	progressMessage: string | null,
+	errorMessage: string | null
+) => void;
+
+let onJobProgress: JobProgressCallback | undefined;
+
+export const setJobProgressCallback = (cb: JobProgressCallback) => {
+	onJobProgress = cb;
+};
+
 type ProgressFn = (progress: number, message: string) => Effect.Effect<void>;
 
 const claimNextJob = (db: Db) =>
@@ -55,7 +69,14 @@ const updateJobProgress = (
 			.update(jobTable)
 			.set({ progress: progressVal, progressMessage: message })
 			.where(eq(jobTable.id, jobId))
-	).pipe(Effect.ignore);
+	).pipe(
+		Effect.tap(() =>
+			Effect.sync(() =>
+				onJobProgress?.(jobId, "running", progressVal, message, null)
+			)
+		),
+		Effect.ignore
+	);
 
 const completeJob = (db: Db, jobId: string) =>
 	Effect.promise(() =>
@@ -67,7 +88,14 @@ const completeJob = (db: Db, jobId: string) =>
 				completedAt: new Date(),
 			})
 			.where(eq(jobTable.id, jobId))
-	).pipe(Effect.ignore);
+	).pipe(
+		Effect.tap(() =>
+			Effect.sync(() =>
+				onJobProgress?.(jobId, "completed", 100, "Indexing complete.", null)
+			)
+		),
+		Effect.ignore
+	);
 
 const failJob = (db: Db, jobId: string, error: string) =>
 	Effect.promise(() =>
@@ -79,7 +107,12 @@ const failJob = (db: Db, jobId: string, error: string) =>
 				completedAt: new Date(),
 			})
 			.where(eq(jobTable.id, jobId))
-	).pipe(Effect.ignore);
+	).pipe(
+		Effect.tap(() =>
+			Effect.sync(() => onJobProgress?.(jobId, "failed", 0, null, error))
+		),
+		Effect.ignore
+	);
 
 const resolveLibraryId = (
 	db: Db,

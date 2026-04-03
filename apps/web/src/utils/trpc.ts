@@ -1,7 +1,12 @@
 import type { AppRouter } from "@indecks/api/routers/index";
 import { env } from "@indecks/env/web";
 import { QueryCache, QueryClient } from "@tanstack/react-query";
-import { createTRPCClient, httpBatchLink } from "@trpc/client";
+import {
+	createTRPCClient,
+	httpBatchLink,
+	httpSubscriptionLink,
+	splitLink,
+} from "@trpc/client";
 import { createTRPCOptionsProxy } from "@trpc/tanstack-react-query";
 import { toast } from "sonner";
 
@@ -18,16 +23,24 @@ export const queryClient = new QueryClient({
 	}),
 });
 
+const trpcUrl = `${env.VITE_SERVER_URL}/trpc`;
+
 export const trpcClient = createTRPCClient<AppRouter>({
 	links: [
-		httpBatchLink({
-			url: `${env.VITE_SERVER_URL}/trpc`,
-			fetch(url, options) {
-				return fetch(url, {
-					...options,
-					credentials: "include",
-				});
-			},
+		splitLink({
+			condition: (op) => op.type === "subscription",
+			true: httpSubscriptionLink({
+				url: trpcUrl,
+			}),
+			false: httpBatchLink({
+				url: trpcUrl,
+				fetch(url, options) {
+					return fetch(url, {
+						...options,
+						credentials: "include",
+					});
+				},
+			}),
 		}),
 	],
 });

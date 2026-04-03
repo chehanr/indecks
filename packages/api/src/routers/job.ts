@@ -6,7 +6,8 @@ import { Effect } from "effect";
 import { z } from "zod";
 
 import { runEffect } from "../effect-trpc";
-import { protectedProcedure, router } from "../index";
+import { jobEvents } from "../events";
+import { protectedProcedure, publicProcedure, router } from "../index";
 
 export const jobRouter = router({
 	get: protectedProcedure
@@ -83,4 +84,26 @@ export const jobRouter = router({
 				})
 			)
 		),
+
+	onProgress: publicProcedure
+		.input(z.object({ jobId: z.string() }))
+		.subscription(async function* (opts) {
+			const { jobId } = opts.input;
+
+			for await (const [event] of jobEvents.toIterable("progress", {
+				signal: opts.signal,
+			})) {
+				if (event.jobId !== jobId) {
+					continue;
+				}
+				yield event;
+				if (
+					event.status === "completed" ||
+					event.status === "failed" ||
+					event.status === "cancelled"
+				) {
+					return;
+				}
+			}
+		}),
 });
