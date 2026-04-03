@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { stat, unlink } from "node:fs/promises";
 
+import { FileSystem } from "@effect/platform";
 import type { Db } from "@indecks/db";
 import { chunk as chunkTable } from "@indecks/db/schema/chunk";
 import { indexer as indexerTable } from "@indecks/db/schema/indexer";
@@ -79,6 +79,7 @@ export const ProcessorServiceLive = Layer.effect(
 	Effect.gen(function* () {
 		const ffmpeg = yield* FFmpegService;
 		const embedSvc = yield* EmbedService;
+		const fs = yield* FileSystem.FileSystem;
 
 		const scanLibraryFolder = (
 			db: Db,
@@ -122,7 +123,7 @@ export const ProcessorServiceLive = Layer.effect(
 					}
 
 					const fileName = filePath.split("/").pop() ?? filePath;
-					const fileStat = yield* Effect.promise(() => stat(filePath));
+					const fileStat = yield* fs.stat(filePath).pipe(Effect.orDie);
 					const duration = yield* ffmpeg
 						.getVideoDuration(filePath)
 						.pipe(Effect.option);
@@ -133,7 +134,7 @@ export const ProcessorServiceLive = Layer.effect(
 							libraryId,
 							filePath,
 							fileName,
-							fileSize: fileStat.size,
+							fileSize: Number(fileStat.size),
 							duration: duration._tag === "Some" ? duration.value : null,
 							status: "pending",
 						})
@@ -224,10 +225,10 @@ export const ProcessorServiceLive = Layer.effect(
 								.pipe(Effect.catchAll(() => Effect.succeed(null)));
 
 							if (downscaledPath) {
-								const videoFile = Bun.file(downscaledPath);
-								const videoBuffer = Buffer.from(
-									yield* Effect.promise(() => videoFile.arrayBuffer())
-								);
+								const videoBytes = yield* fs
+									.readFile(downscaledPath)
+									.pipe(Effect.orDie);
+								const videoBuffer = Buffer.from(videoBytes);
 
 								const embeddingResult = yield* embedSvc
 									.embedVideo(videoBuffer, ctx.config, ctx.instruction)
@@ -263,9 +264,7 @@ export const ProcessorServiceLive = Layer.effect(
 									);
 								}
 
-								yield* Effect.promise(() =>
-									unlink(downscaledPath).catch(() => undefined)
-								);
+								yield* fs.remove(downscaledPath).pipe(Effect.ignore);
 							} else {
 								yield* Effect.promise(() =>
 									db

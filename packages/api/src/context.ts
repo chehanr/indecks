@@ -1,3 +1,5 @@
+import { FetchHttpClient } from "@effect/platform";
+import { BunCommandExecutor, BunFileSystem } from "@effect/platform-bun";
 import { AuthService, AuthServiceLive } from "@indecks/auth";
 import { DbServiceLive } from "@indecks/db";
 import { ServerConfigLive } from "@indecks/env/server";
@@ -11,23 +13,30 @@ import type { Context as HonoContext } from "hono";
 
 export const makeAppLayer = (vectorDbDir: string) => {
 	const ConfigLayer = ServerConfigLive;
+	const FsLayer = BunFileSystem.layer;
+	const CmdLayer = BunCommandExecutor.layer.pipe(Layer.provide(FsLayer));
+	const HttpLayer = FetchHttpClient.layer;
+	const PlatformLayer = Layer.mergeAll(FsLayer, CmdLayer, HttpLayer);
 	const DbLayer = DbServiceLive.pipe(Layer.provide(ConfigLayer));
 	const AuthLayer = AuthServiceLive.pipe(
 		Layer.provide(Layer.merge(DbLayer, ConfigLayer))
 	);
 	const VectorDbLayer = VectorDbManagerServiceLive(vectorDbDir).pipe(
-		Layer.provide(ConfigLayer),
+		Layer.provide(Layer.merge(ConfigLayer, PlatformLayer)),
 		Layer.orDie
 	);
-	const EmbedLayer = EmbedServiceLive;
-	const FFmpegLayer = FFmpegServiceLive;
+	const EmbedLayer = EmbedServiceLive.pipe(Layer.provide(PlatformLayer));
+	const FFmpegLayer = FFmpegServiceLive.pipe(Layer.provide(PlatformLayer));
 	const ProcessorLayer = ProcessorServiceLive.pipe(
-		Layer.provide(Layer.mergeAll(DbLayer, EmbedLayer, FFmpegLayer))
+		Layer.provide(
+			Layer.mergeAll(DbLayer, EmbedLayer, FFmpegLayer, PlatformLayer)
+		)
 	);
 	const JobQueueLayer = JobQueueServiceLive.pipe(Layer.provide(ProcessorLayer));
 
 	return Layer.mergeAll(
 		ConfigLayer,
+		PlatformLayer,
 		DbLayer,
 		AuthLayer,
 		VectorDbLayer,

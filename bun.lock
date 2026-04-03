@@ -80,6 +80,8 @@
     "packages/api": {
       "name": "@indecks/api",
       "dependencies": {
+        "@effect/platform": "catalog:",
+        "@effect/platform-bun": "catalog:",
         "@indecks/auth": "workspace:*",
         "@indecks/db": "workspace:*",
         "@indecks/pipeline": "workspace:*",
@@ -146,6 +148,7 @@
     "packages/pipeline": {
       "name": "@indecks/pipeline",
       "dependencies": {
+        "@effect/platform": "catalog:",
         "@indecks/db": "workspace:*",
         "@indecks/vector": "workspace:*",
         "drizzle-orm": "^0.45.2",
@@ -185,6 +188,7 @@
     "packages/vector": {
       "name": "@indecks/vector",
       "dependencies": {
+        "@effect/platform": "catalog:",
         "effect": "catalog:",
         "sqlite-vec": "^0.1.9",
       },

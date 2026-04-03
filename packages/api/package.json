@@ -11,6 +11,8 @@
   },
   "scripts": {},
   "dependencies": {
+    "@effect/platform": "catalog:",
+    "@effect/platform-bun": "catalog:",
     "@indecks/auth": "workspace:*",
     "@indecks/db": "workspace:*",
     "@indecks/pipeline": "workspace:*",

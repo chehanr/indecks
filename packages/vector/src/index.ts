@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
-import { readdir, unlink } from "node:fs/promises";
 import { resolve } from "node:path";
+
+import { FileSystem } from "@effect/platform";
 import { Context, Effect, Layer, Ref } from "effect";
 import { getLoadablePath } from "sqlite-vec";
 
@@ -210,6 +211,7 @@ export const VectorDbManagerServiceLive = (dir: string) =>
 		VectorDbManagerService,
 		Effect.gen(function* () {
 			yield* loadCustomSQLite;
+			const fsService = yield* FileSystem.FileSystem;
 			const cache = yield* Ref.make(new Map<string, VectorDb>());
 
 			yield* Effect.addFinalizer(() =>
@@ -227,22 +229,11 @@ export const VectorDbManagerServiceLive = (dir: string) =>
 			const dbFileName = (libraryId: string, indexerId: string) =>
 				`vector-${libraryId}-${indexerId}.db`;
 
-			const unlinkSafe = async (path: string) => {
-				await unlink(path).catch(() => undefined);
-			};
-
 			const removeDbFiles = (dbPath: string) =>
-				Effect.tryPromise({
-					try: async () => {
-						await unlinkSafe(dbPath);
-						await unlinkSafe(`${dbPath}-wal`);
-						await unlinkSafe(`${dbPath}-shm`);
-					},
-					catch: (e) =>
-						new VectorDbError({
-							message: `Failed to remove vector DB files: ${e}`,
-							cause: e,
-						}),
+				Effect.gen(function* () {
+					yield* fsService.remove(dbPath).pipe(Effect.ignore);
+					yield* fsService.remove(`${dbPath}-wal`).pipe(Effect.ignore);
+					yield* fsService.remove(`${dbPath}-shm`).pipe(Effect.ignore);
 				});
 
 			const removeSingle = (libraryId: string, indexerId: string) =>
@@ -277,9 +268,9 @@ export const VectorDbManagerServiceLive = (dir: string) =>
 						}
 					}
 					const filePrefix = `vector-${libraryId}-`;
-					const files = yield* Effect.promise(() =>
-						readdir(dir).catch(() => [])
-					);
+					const files = yield* fsService
+						.readDirectory(dir)
+						.pipe(Effect.catchAll(() => Effect.succeed([] as string[])));
 					for (const file of files) {
 						if (
 							file.startsWith(filePrefix) &&
@@ -287,7 +278,7 @@ export const VectorDbManagerServiceLive = (dir: string) =>
 								file.endsWith(".db-wal") ||
 								file.endsWith(".db-shm"))
 						) {
-							yield* Effect.promise(() => unlinkSafe(resolve(dir, file)));
+							yield* fsService.remove(resolve(dir, file)).pipe(Effect.ignore);
 						}
 					}
 				});

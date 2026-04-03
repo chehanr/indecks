@@ -1,4 +1,4 @@
-import { access } from "node:fs/promises";
+import { FileSystem } from "@effect/platform";
 import { DbService } from "@indecks/db";
 import { chunk as chunkTable } from "@indecks/db/schema/chunk";
 import { indexer as indexerTable } from "@indecks/db/schema/indexer";
@@ -70,13 +70,16 @@ export const libraryRouter = router({
 				Effect.gen(function* () {
 					const db = yield* DbService;
 
-					yield* Effect.tryPromise({
-						try: () => access(input.folderPath),
-						catch: () =>
-							new FolderNotAccessibleError({
-								path: input.folderPath,
-							}),
-					});
+					const fsService = yield* FileSystem.FileSystem;
+					yield* fsService.access(input.folderPath).pipe(
+						Effect.catchAll(() =>
+							Effect.fail(
+								new FolderNotAccessibleError({
+									path: input.folderPath,
+								})
+							)
+						)
+					);
 
 					const id = nanoid();
 					yield* Effect.promise(() =>
@@ -112,13 +115,16 @@ export const libraryRouter = router({
 						set.name = fields.name;
 					}
 					if (fields.folderPath !== undefined) {
-						yield* Effect.tryPromise({
-							try: () => access(fields.folderPath as string),
-							catch: () =>
-								new FolderNotAccessibleError({
-									path: fields.folderPath as string,
-								}),
-						});
+						const fsService = yield* FileSystem.FileSystem;
+						yield* fsService.access(fields.folderPath as string).pipe(
+							Effect.catchAll(() =>
+								Effect.fail(
+									new FolderNotAccessibleError({
+										path: fields.folderPath as string,
+									})
+								)
+							)
+						);
 						set.folderPath = fields.folderPath;
 					}
 

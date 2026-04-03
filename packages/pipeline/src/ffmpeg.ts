@@ -1,12 +1,35 @@
-import { readdir, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+
+import { Command, CommandExecutor, FileSystem } from "@effect/platform";
+import type { PlatformError } from "@effect/platform/Error";
 import { Context, Effect, Layer } from "effect";
 
 import { FFmpegError } from "./errors";
 
 const SUPPORTED_EXTENSIONS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm"]);
 const MP4_EXT = /\.mp4$/;
+
+const walkVideoDir = (
+	fsService: FileSystem.FileSystem,
+	dir: string,
+	videos: string[]
+): Effect.Effect<void, PlatformError> =>
+	Effect.gen(function* () {
+		const entries = yield* fsService.readDirectory(dir);
+		for (const entry of entries) {
+			const fullPath = join(dir, entry);
+			const info = yield* fsService.stat(fullPath);
+			if (info.type === "Directory") {
+				yield* walkVideoDir(fsService, fullPath, videos);
+			} else if (info.type === "File") {
+				const ext = entry.slice(entry.lastIndexOf(".")).toLowerCase();
+				if (SUPPORTED_EXTENSIONS.has(ext)) {
+					videos.push(fullPath);
+				}
+			}
+		}
+	});
 
 export interface ChunkInfo {
 	chunkPath: string;
@@ -25,39 +48,64 @@ export interface DownscaleOptions {
 	height?: number;
 }
 
-const run = (
+const runString = (
+	executor: CommandExecutor.CommandExecutor,
 	cmd: string,
 	args: string[]
-): Effect.Effect<
-	{ stdout: string; stderr: string; exitCode: number },
-	FFmpegError
-> =>
-	Effect.tryPromise({
-		try: async () => {
-			const proc = Bun.spawn([cmd, ...args], {
-				stdout: "pipe",
-				stderr: "pipe",
-			});
-			const [stdout, stderr] = await Promise.all([
-				new Response(proc.stdout).text(),
-				new Response(proc.stderr).text(),
-			]);
-			const exitCode = await proc.exited;
-			return { stdout, stderr, exitCode };
-		},
-		catch: (e) =>
-			new FFmpegError({
-				command: `${cmd} ${args.join(" ")}`,
-				exitCode: -1,
-				stderr: String(e),
-			}),
-	});
+): Effect.Effect<string, FFmpegError> =>
+	Command.make(cmd, ...args).pipe(
+		Command.string,
+		Effect.provideService(CommandExecutor.CommandExecutor, executor),
+		Effect.catchAll((e) =>
+			Effect.fail(
+				new FFmpegError({
+					command: `${cmd} ${args.join(" ")}`,
+					exitCode: -1,
+					stderr: String(e),
+				})
+			)
+		)
+	);
 
-const getVideoDurationImpl = (
+const runExitCode = (
+	executor: CommandExecutor.CommandExecutor,
+	cmd: string,
+	args: string[]
+): Effect.Effect<void, FFmpegError> =>
+	Command.make(cmd, ...args).pipe(
+		Command.exitCode,
+		Effect.provideService(CommandExecutor.CommandExecutor, executor),
+		Effect.flatMap((code) =>
+			code === 0
+				? Effect.void
+				: Effect.fail(
+						new FFmpegError({
+							command: `${cmd} ${args.join(" ")}`,
+							exitCode: code,
+							stderr: "",
+						})
+					)
+		),
+		Effect.catchAll((e) => {
+			if (e instanceof FFmpegError) {
+				return Effect.fail(e);
+			}
+			return Effect.fail(
+				new FFmpegError({
+					command: `${cmd} ${args.join(" ")}`,
+					exitCode: -1,
+					stderr: String(e),
+				})
+			);
+		})
+	);
+
+const getVideoDuration = (
+	executor: CommandExecutor.CommandExecutor,
 	filePath: string
 ): Effect.Effect<number, FFmpegError> =>
 	Effect.gen(function* () {
-		const { stdout, exitCode } = yield* run("ffprobe", [
+		const stdout = yield* runString(executor, "ffprobe", [
 			"-v",
 			"quiet",
 			"-print_format",
@@ -65,13 +113,6 @@ const getVideoDurationImpl = (
 			"-show_format",
 			filePath,
 		]);
-		if (exitCode !== 0) {
-			return yield* new FFmpegError({
-				command: `ffprobe ${filePath}`,
-				exitCode,
-				stderr: "ffprobe failed",
-			});
-		}
 		const info = JSON.parse(stdout) as {
 			format: { duration: string };
 		};
@@ -103,237 +144,197 @@ export class FFmpegService extends Context.Tag("FFmpegService")<
 	FFmpegServiceShape
 >() {}
 
-export const FFmpegServiceLive = Layer.succeed(FFmpegService, {
-	getVideoDuration: getVideoDurationImpl,
+export const FFmpegServiceLive = Layer.effect(
+	FFmpegService,
+	Effect.gen(function* () {
+		const fs = yield* FileSystem.FileSystem;
+		const executor = yield* CommandExecutor.CommandExecutor;
 
-	chunkVideo: (filePath, options = {}) =>
-		Effect.gen(function* () {
-			const { chunkDuration = 30, overlap = 5 } = options;
-			const absPath = resolve(filePath);
-			const duration = yield* getVideoDurationImpl(absPath);
-			const tmpDir = join(tmpdir(), `indecks_chunks_${Date.now()}`);
-			yield* Effect.tryPromise({
-				try: () => Bun.write(join(tmpDir, ".keep"), ""),
-				catch: (e) =>
-					new FFmpegError({
-						command: "mkdir tmpdir",
-						exitCode: -1,
-						stderr: String(e),
-					}),
-			});
+		return {
+			getVideoDuration: (filePath) => getVideoDuration(executor, filePath),
 
-			const step = chunkDuration - overlap;
-			const chunks: ChunkInfo[] = [];
+			chunkVideo: (filePath, options = {}) =>
+				Effect.gen(function* () {
+					const { chunkDuration = 30, overlap = 5 } = options;
+					const absPath = resolve(filePath);
+					const duration = yield* getVideoDuration(executor, absPath);
+					const tmpDir = join(tmpdir(), `indecks_chunks_${Date.now()}`);
+					yield* fs.makeDirectory(tmpDir, { recursive: true }).pipe(
+						Effect.mapError(
+							(e) =>
+								new FFmpegError({
+									command: "mkdir tmpdir",
+									exitCode: -1,
+									stderr: String(e),
+								})
+						)
+					);
 
-			if (duration <= chunkDuration) {
-				const chunkPath = join(tmpDir, "chunk_000.mp4");
-				const { exitCode } = yield* run("ffmpeg", [
-					"-y",
-					"-ss",
-					"0",
-					"-i",
-					absPath,
-					"-t",
-					String(duration),
-					"-c",
-					"copy",
-					chunkPath,
-				]);
-				if (exitCode !== 0) {
-					return yield* new FFmpegError({
-						command: `ffmpeg chunk ${absPath}`,
-						exitCode,
-						stderr: "chunk failed",
-					});
-				}
-				return [
-					{
-						chunkPath,
-						sourceFile: absPath,
-						startTime: 0,
-						endTime: duration,
-					},
-				];
-			}
+					const step = chunkDuration - overlap;
+					const chunks: ChunkInfo[] = [];
 
-			let start = 0;
-			let idx = 0;
-			while (start < duration) {
-				const end = Math.min(start + chunkDuration, duration);
-				const t = end - start;
-				const chunkPath = join(
-					tmpDir,
-					`chunk_${String(idx).padStart(3, "0")}.mp4`
-				);
+					if (duration <= chunkDuration) {
+						const chunkPath = join(tmpDir, "chunk_000.mp4");
+						yield* runExitCode(executor, "ffmpeg", [
+							"-y",
+							"-ss",
+							"0",
+							"-i",
+							absPath,
+							"-t",
+							String(duration),
+							"-c",
+							"copy",
+							chunkPath,
+						]);
+						return [
+							{
+								chunkPath,
+								sourceFile: absPath,
+								startTime: 0,
+								endTime: duration,
+							},
+						];
+					}
 
-				const { exitCode } = yield* run("ffmpeg", [
-					"-y",
-					"-ss",
-					String(start),
-					"-i",
-					absPath,
-					"-t",
-					String(t),
-					"-c",
-					"copy",
-					chunkPath,
-				]);
-				if (exitCode !== 0) {
-					return yield* new FFmpegError({
-						command: `ffmpeg chunk at ${start}s`,
-						exitCode,
-						stderr: "chunk failed",
-					});
-				}
+					let start = 0;
+					let idx = 0;
+					while (start < duration) {
+						const end = Math.min(start + chunkDuration, duration);
+						const t = end - start;
+						const chunkPath = join(
+							tmpDir,
+							`chunk_${String(idx).padStart(3, "0")}.mp4`
+						);
 
-				chunks.push({
-					chunkPath,
-					sourceFile: absPath,
-					startTime: start,
-					endTime: end,
-				});
+						yield* runExitCode(executor, "ffmpeg", [
+							"-y",
+							"-ss",
+							String(start),
+							"-i",
+							absPath,
+							"-t",
+							String(t),
+							"-c",
+							"copy",
+							chunkPath,
+						]);
 
-				start += step;
-				idx++;
-				if (start + overlap >= duration) {
-					break;
-				}
-			}
+						chunks.push({
+							chunkPath,
+							sourceFile: absPath,
+							startTime: start,
+							endTime: end,
+						});
 
-			return chunks;
-		}),
-
-	downscaleChunk: (chunkPath, options = {}) =>
-		Effect.gen(function* () {
-			const { height = 480, fps = 5 } = options;
-			const outPath = chunkPath.replace(MP4_EXT, "_ds.mp4");
-
-			const { exitCode, stderr } = yield* run("ffmpeg", [
-				"-y",
-				"-i",
-				chunkPath,
-				"-vf",
-				`scale=-2:${height},fps=${fps}`,
-				"-c:v",
-				"libx264",
-				"-preset",
-				"ultrafast",
-				"-an",
-				outPath,
-			]);
-
-			if (exitCode !== 0) {
-				return yield* new FFmpegError({
-					command: "ffmpeg downscale",
-					exitCode,
-					stderr,
-				});
-			}
-
-			return outPath;
-		}),
-
-	isStillFrame: (chunkPath, threshold = 0.98) =>
-		Effect.gen(function* () {
-			const tmpDir = join(tmpdir(), `indecks_still_${Date.now()}`);
-			yield* Effect.tryPromise({
-				try: () => Bun.write(join(tmpDir, ".keep"), ""),
-				catch: () =>
-					new FFmpegError({ command: "mkdir", exitCode: -1, stderr: "" }),
-			}).pipe(Effect.ignore);
-
-			const durationResult = yield* getVideoDurationImpl(chunkPath).pipe(
-				Effect.option
-			);
-
-			if (durationResult._tag === "None") {
-				return false;
-			}
-			const duration = durationResult.value;
-
-			const times = [duration * 0.25, duration * 0.5, duration * 0.75];
-			for (const [idx, t] of times.entries()) {
-				yield* run("ffmpeg", [
-					"-y",
-					"-ss",
-					String(t),
-					"-i",
-					chunkPath,
-					"-frames:v",
-					"1",
-					join(tmpDir, `frame_${String(idx).padStart(3, "0")}.jpg`),
-				]).pipe(Effect.ignore);
-			}
-
-			const sizes: number[] = [];
-			for (let i = 0; i < 3; i++) {
-				const framePath = join(
-					tmpDir,
-					`frame_${String(i).padStart(3, "0")}.jpg`
-				);
-				const file = Bun.file(framePath);
-				const exists = yield* Effect.promise(() => file.exists());
-				if (exists) {
-					sizes.push(file.size);
-				}
-				yield* Effect.promise(() => unlink(framePath).catch(() => undefined));
-			}
-			yield* Effect.promise(() =>
-				unlink(join(tmpDir, ".keep")).catch(() => undefined)
-			);
-
-			if (sizes.length < 2) {
-				return false;
-			}
-
-			const minSize = Math.min(...sizes);
-			const maxSize = Math.max(...sizes);
-			if (maxSize === 0) {
-				return false;
-			}
-
-			return minSize / maxSize >= threshold;
-		}),
-
-	scanDirectory: (dirPath) =>
-		Effect.tryPromise({
-			try: async () => {
-				const absDir = resolve(dirPath);
-				const videos: string[] = [];
-
-				const walk = async (dir: string): Promise<void> => {
-					const entries = await readdir(dir, { withFileTypes: true });
-					for (const entry of entries) {
-						const fullPath = join(dir, entry.name);
-						if (entry.isDirectory()) {
-							await walk(fullPath);
-						} else if (entry.isFile()) {
-							const ext = entry.name
-								.slice(entry.name.lastIndexOf("."))
-								.toLowerCase();
-							if (SUPPORTED_EXTENSIONS.has(ext)) {
-								videos.push(fullPath);
-							}
+						start += step;
+						idx++;
+						if (start + overlap >= duration) {
+							break;
 						}
 					}
-				};
 
-				await walk(absDir);
-				videos.sort();
-				return videos;
-			},
-			catch: () =>
-				new FFmpegError({
-					command: "scanDirectory",
-					exitCode: -1,
-					stderr: "scan failed",
+					return chunks;
 				}),
-		}).pipe(Effect.catchAll(() => Effect.succeed([] as string[]))),
 
-	cleanupChunks: (chunks) =>
-		Effect.promise(async () => {
-			for (const chunk of chunks) {
-				await unlink(chunk.chunkPath).catch(() => undefined);
-			}
-		}),
-});
+			downscaleChunk: (chunkPath, options = {}) =>
+				Effect.gen(function* () {
+					const { height = 480, fps = 5 } = options;
+					const outPath = chunkPath.replace(MP4_EXT, "_ds.mp4");
+
+					yield* runExitCode(executor, "ffmpeg", [
+						"-y",
+						"-i",
+						chunkPath,
+						"-vf",
+						`scale=-2:${height},fps=${fps}`,
+						"-c:v",
+						"libx264",
+						"-preset",
+						"ultrafast",
+						"-an",
+						outPath,
+					]);
+
+					return outPath;
+				}),
+
+			isStillFrame: (chunkPath, threshold = 0.98) =>
+				Effect.gen(function* () {
+					const tmpDir = join(tmpdir(), `indecks_still_${Date.now()}`);
+					yield* fs
+						.makeDirectory(tmpDir, { recursive: true })
+						.pipe(Effect.ignore);
+
+					const durationResult = yield* getVideoDuration(
+						executor,
+						chunkPath
+					).pipe(Effect.option);
+
+					if (durationResult._tag === "None") {
+						return false;
+					}
+					const duration = durationResult.value;
+
+					const times = [duration * 0.25, duration * 0.5, duration * 0.75];
+					for (const [idx, t] of times.entries()) {
+						yield* runExitCode(executor, "ffmpeg", [
+							"-y",
+							"-ss",
+							String(t),
+							"-i",
+							chunkPath,
+							"-frames:v",
+							"1",
+							join(tmpDir, `frame_${String(idx).padStart(3, "0")}.jpg`),
+						]).pipe(Effect.ignore);
+					}
+
+					const sizes: number[] = [];
+					for (let i = 0; i < 3; i++) {
+						const framePath = join(
+							tmpDir,
+							`frame_${String(i).padStart(3, "0")}.jpg`
+						);
+						const exists = yield* fs
+							.exists(framePath)
+							.pipe(Effect.orElseSucceed(() => false));
+						if (exists) {
+							const info = yield* fs.stat(framePath).pipe(Effect.orDie);
+							sizes.push(Number(info.size));
+						}
+						yield* fs.remove(framePath).pipe(Effect.ignore);
+					}
+					yield* fs.remove(tmpDir, { recursive: true }).pipe(Effect.ignore);
+
+					if (sizes.length < 2) {
+						return false;
+					}
+
+					const minSize = Math.min(...sizes);
+					const maxSize = Math.max(...sizes);
+					if (maxSize === 0) {
+						return false;
+					}
+
+					return minSize / maxSize >= threshold;
+				}),
+
+			scanDirectory: (dirPath) =>
+				Effect.gen(function* () {
+					const absDir = resolve(dirPath);
+					const videos: string[] = [];
+					yield* walkVideoDir(fs, absDir, videos).pipe(Effect.ignore);
+					videos.sort();
+					return videos;
+				}).pipe(Effect.catchAll(() => Effect.succeed([] as string[]))),
+
+			cleanupChunks: (chunks) =>
+				Effect.forEach(
+					chunks,
+					(chunk) => fs.remove(chunk.chunkPath).pipe(Effect.ignore),
+					{ discard: true }
+				),
+		};
+	})
+);

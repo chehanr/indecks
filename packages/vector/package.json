@@ -1,6 +1,7 @@
 {
   "name": "@indecks/vector",
   "dependencies": {
+    "@effect/platform": "catalog:",
     "effect": "catalog:",
     "sqlite-vec": "^0.1.9"
   },
