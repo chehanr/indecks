@@ -38,7 +38,7 @@ RUN bun install --frozen-lockfile --production
 
 # --- Production ---
 FROM base AS production
-RUN apk add --no-cache ffmpeg=6.1.2-r2 sqlite-libs=3.49.2-r1
+RUN apk add --no-cache ffmpeg=6.1.2-r2 sqlite-libs=3.49.2-r1 gcompat=1.1.0-r4
 
 WORKDIR /app
 
