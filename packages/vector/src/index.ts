@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { unlink } from "node:fs/promises";
+import { readdir, unlink } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Context, Effect, Layer, Ref } from "effect";
 import { getLoadablePath } from "sqlite-vec";
@@ -192,9 +192,13 @@ export interface VectorDbManagerShape {
 	readonly closeAll: () => Effect.Effect<void>;
 	readonly get: (
 		libraryId: string,
+		embedderId: string,
 		dimensions: number
 	) => Effect.Effect<VectorDb, VectorDbError | VectorDbDimensionMismatchError>;
-	readonly remove: (libraryId: string) => Effect.Effect<void, VectorDbError>;
+	readonly remove: (
+		libraryId: string,
+		embedderId?: string
+	) => Effect.Effect<void, VectorDbError>;
 }
 
 export class VectorDbManagerService extends Context.Tag(
@@ -217,11 +221,83 @@ export const VectorDbManagerServiceLive = (dir: string) =>
 				})
 			);
 
+			const cacheKey = (libraryId: string, embedderId: string) =>
+				`${libraryId}:${embedderId}`;
+
+			const dbFileName = (libraryId: string, embedderId: string) =>
+				`vector-${libraryId}-${embedderId}.db`;
+
+			const unlinkSafe = async (path: string) => {
+				await unlink(path).catch(() => undefined);
+			};
+
+			const removeDbFiles = (dbPath: string) =>
+				Effect.tryPromise({
+					try: async () => {
+						await unlinkSafe(dbPath);
+						await unlinkSafe(`${dbPath}-wal`);
+						await unlinkSafe(`${dbPath}-shm`);
+					},
+					catch: (e) =>
+						new VectorDbError({
+							message: `Failed to remove vector DB files: ${e}`,
+							cause: e,
+						}),
+				});
+
+			const removeSingle = (libraryId: string, embedderId: string) =>
+				Effect.gen(function* () {
+					const map = yield* Ref.get(cache);
+					const key = cacheKey(libraryId, embedderId);
+					const existing = map.get(key);
+					if (existing) {
+						yield* existing.close();
+						yield* Ref.update(cache, (m) => {
+							const next = new Map(m);
+							next.delete(key);
+							return next;
+						});
+					}
+					const dbPath = resolve(dir, dbFileName(libraryId, embedderId));
+					yield* removeDbFiles(dbPath);
+				});
+
+			const removeAll = (libraryId: string) =>
+				Effect.gen(function* () {
+					const map = yield* Ref.get(cache);
+					const prefix = `${libraryId}:`;
+					for (const [key, vdb] of map) {
+						if (key.startsWith(prefix)) {
+							yield* vdb.close();
+							yield* Ref.update(cache, (m) => {
+								const next = new Map(m);
+								next.delete(key);
+								return next;
+							});
+						}
+					}
+					const filePrefix = `vector-${libraryId}-`;
+					const files = yield* Effect.promise(() =>
+						readdir(dir).catch(() => [])
+					);
+					for (const file of files) {
+						if (
+							file.startsWith(filePrefix) &&
+							(file.endsWith(".db") ||
+								file.endsWith(".db-wal") ||
+								file.endsWith(".db-shm"))
+						) {
+							yield* Effect.promise(() => unlinkSafe(resolve(dir, file)));
+						}
+					}
+				});
+
 			return {
-				get: (libraryId, dimensions) =>
+				get: (libraryId, embedderId, dimensions) =>
 					Effect.gen(function* () {
+						const key = cacheKey(libraryId, embedderId);
 						const map = yield* Ref.get(cache);
-						const existing = map.get(libraryId);
+						const existing = map.get(key);
 						if (existing) {
 							if (existing.getDimensions() !== dimensions) {
 								return yield* new VectorDbDimensionMismatchError({
@@ -232,38 +308,16 @@ export const VectorDbManagerServiceLive = (dir: string) =>
 							}
 							return existing;
 						}
-						const dbPath = resolve(dir, `vector-${libraryId}.db`);
+						const dbPath = resolve(dir, dbFileName(libraryId, embedderId));
 						const vdb = yield* makeVectorDb(dbPath, dimensions);
-						yield* Ref.update(cache, (m) => new Map(m).set(libraryId, vdb));
+						yield* Ref.update(cache, (m) => new Map(m).set(key, vdb));
 						return vdb;
 					}),
 
-				remove: (libraryId) =>
-					Effect.gen(function* () {
-						const map = yield* Ref.get(cache);
-						const existing = map.get(libraryId);
-						if (existing) {
-							yield* existing.close();
-							yield* Ref.update(cache, (m) => {
-								const next = new Map(m);
-								next.delete(libraryId);
-								return next;
-							});
-						}
-						const dbPath = resolve(dir, `vector-${libraryId}.db`);
-						yield* Effect.tryPromise({
-							try: async () => {
-								await unlink(dbPath).catch(() => undefined);
-								await unlink(`${dbPath}-wal`).catch(() => undefined);
-								await unlink(`${dbPath}-shm`).catch(() => undefined);
-							},
-							catch: (e) =>
-								new VectorDbError({
-									message: `Failed to remove vector DB files: ${e}`,
-									cause: e,
-								}),
-						});
-					}),
+				remove: (libraryId, embedderId) =>
+					embedderId
+						? removeSingle(libraryId, embedderId)
+						: removeAll(libraryId),
 
 				closeAll: () =>
 					Effect.gen(function* () {

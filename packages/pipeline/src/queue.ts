@@ -6,49 +6,10 @@ import type { VectorDbManagerShape } from "@indecks/vector";
 import { and, eq } from "drizzle-orm";
 import { Context, Effect, type Fiber, Layer, Schedule } from "effect";
 
-import type { EmbedConfig } from "./embedder";
-import {
-	JobMissingFieldError,
-	LibraryEmbeddingNotConfiguredError,
-	UnknownJobTypeError,
-} from "./errors";
+import { JobMissingFieldError, UnknownJobTypeError } from "./errors";
 import { ProcessorService } from "./processor";
 
 type ProgressFn = (progress: number, message: string) => Effect.Effect<void>;
-
-const getLibraryEmbedConfig = (
-	db: Db,
-	libraryId: string
-): Effect.Effect<EmbedConfig, LibraryEmbeddingNotConfiguredError> =>
-	Effect.gen(function* () {
-		const lib = yield* Effect.promise(() =>
-			db
-				.select({
-					embeddingBaseUrl: libraryTable.embeddingBaseUrl,
-					embeddingApiKey: libraryTable.embeddingApiKey,
-					embeddingModel: libraryTable.embeddingModel,
-					embeddingDimensions: libraryTable.embeddingDimensions,
-				})
-				.from(libraryTable)
-				.where(eq(libraryTable.id, libraryId))
-				.get()
-		);
-
-		if (
-			!(lib?.embeddingBaseUrl && lib.embeddingModel && lib.embeddingDimensions)
-		) {
-			return yield* new LibraryEmbeddingNotConfiguredError({
-				libraryId,
-			});
-		}
-
-		return {
-			baseUrl: lib.embeddingBaseUrl,
-			apiKey: lib.embeddingApiKey ?? "",
-			model: lib.embeddingModel,
-			dimensions: lib.embeddingDimensions,
-		};
-	});
 
 const claimNextJob = (db: Db) =>
 	Effect.tryPromise({
@@ -206,6 +167,12 @@ export const JobQueueServiceLive = Layer.effect(
 								field: "videoId",
 							});
 						}
+						if (!jobRow.embedderId) {
+							return yield* new JobMissingFieldError({
+								jobType: "index_video",
+								field: "embedderId",
+							});
+						}
 						const libraryId = yield* resolveLibraryId(db, jobRow);
 						if (!libraryId) {
 							return yield* new JobMissingFieldError({
@@ -213,35 +180,12 @@ export const JobQueueServiceLive = Layer.effect(
 								field: "libraryId",
 							});
 						}
-						const embedConfig = yield* getLibraryEmbedConfig(db, libraryId);
-						const vectorDb = yield* vectorDbManager.get(
-							libraryId,
-							embedConfig.dimensions
-						);
-						const lib = yield* Effect.promise(() =>
-							db
-								.select({
-									embeddingInstruction: libraryTable.embeddingInstruction,
-									chunkDuration: libraryTable.chunkDuration,
-									chunkOverlap: libraryTable.chunkOverlap,
-									downscaleFps: libraryTable.downscaleFps,
-								})
-								.from(libraryTable)
-								.where(eq(libraryTable.id, libraryId))
-								.get()
-						);
 						yield* processor.processVideo(
 							db,
-							vectorDb,
 							jobRow.videoId,
-							embedConfig,
-							onProgress(jobRow.id),
-							lib?.embeddingInstruction ?? undefined,
-							{
-								chunkDuration: lib?.chunkDuration ?? 30,
-								overlap: lib?.chunkOverlap ?? 5,
-							},
-							lib?.downscaleFps ?? 5
+							jobRow.embedderId,
+							vectorDbManager,
+							onProgress(jobRow.id)
 						);
 					});
 
@@ -253,19 +197,17 @@ export const JobQueueServiceLive = Layer.effect(
 								field: "libraryId",
 							});
 						}
-						const embedConfig = yield* getLibraryEmbedConfig(
-							db,
-							jobRow.libraryId
-						);
-						const vectorDb = yield* vectorDbManager.get(
-							jobRow.libraryId,
-							embedConfig.dimensions
-						);
+						if (!jobRow.embedderId) {
+							return yield* new JobMissingFieldError({
+								jobType: "index_library",
+								field: "embedderId",
+							});
+						}
 						yield* processor.indexLibrary(
 							db,
-							vectorDb,
+							vectorDbManager,
 							jobRow.libraryId,
-							embedConfig,
+							jobRow.embedderId,
 							onProgress(jobRow.id)
 						);
 					});

@@ -1,0 +1,1 @@
+ALTER TABLE `job` ADD `embedder_id` text;

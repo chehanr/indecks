@@ -57,3 +57,9 @@ export class UnknownJobTypeError extends Data.TaggedError(
 )<{
 	readonly jobType: string;
 }> {}
+
+export class EmbedderNotFoundError extends Data.TaggedError(
+	"EmbedderNotFoundError"
+)<{
+	readonly embedderId: string;
+}> {}

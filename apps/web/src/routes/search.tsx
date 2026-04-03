@@ -111,18 +111,30 @@ function SearchResultCard({ result }: { result: SearchResult }) {
 function SearchPage() {
 	const [query, setQuery] = useState("");
 	const [libraryId, setLibraryId] = useState("");
+	const [embedderId, setEmbedderId] = useState("");
 	const [searchQuery, setSearchQuery] = useState("");
 
 	const librariesQuery = useQuery(trpc.library.list.queryOptions());
+	const embeddersQuery = useQuery({
+		...trpc.embedder.list.queryOptions({ libraryId }),
+		enabled: libraryId.length > 0,
+	});
 
 	const searchResults = useQuery({
 		...trpc.search.query.queryOptions({
 			query: searchQuery,
 			libraryId,
+			embedderId: embedderId || undefined,
 			limit: 20,
 		}),
 		enabled: searchQuery.length > 0 && libraryId.length > 0,
 	});
+
+	const handleLibraryChange = (newLibraryId: string) => {
+		setLibraryId(newLibraryId);
+		setEmbedderId("");
+		setSearchQuery("");
+	};
 
 	const handleSearch = (e: React.FormEvent) => {
 		e.preventDefault();
@@ -130,6 +142,9 @@ function SearchPage() {
 			setSearchQuery(query.trim());
 		}
 	};
+
+	const defaultEmbedder = embeddersQuery.data?.find((e) => e.isDefault);
+	const selectedEmbedderId = embedderId || defaultEmbedder?.id || "";
 
 	return (
 		<div className="container mx-auto max-w-3xl space-y-6 px-4 py-6">
@@ -153,7 +168,7 @@ function SearchPage() {
 							<select
 								className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
 								id="library"
-								onChange={(e) => setLibraryId(e.target.value)}
+								onChange={(e) => handleLibraryChange(e.target.value)}
 								value={libraryId}
 							>
 								<option value="">Select a library</option>
@@ -164,6 +179,26 @@ function SearchPage() {
 								))}
 							</select>
 						</div>
+						{libraryId &&
+							embeddersQuery.data &&
+							embeddersQuery.data.length > 0 && (
+								<div className="flex flex-col gap-2">
+									<Label htmlFor="embedder">Embedder</Label>
+									<select
+										className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+										id="embedder"
+										onChange={(e) => setEmbedderId(e.target.value)}
+										value={selectedEmbedderId}
+									>
+										{embeddersQuery.data.map((emb) => (
+											<option key={emb.id} value={emb.id}>
+												{emb.name} ({emb.model}, {emb.dimensions}d)
+												{emb.isDefault ? " — default" : ""}
+											</option>
+										))}
+									</select>
+								</div>
+							)}
 						<Button
 							disabled={
 								!(query.trim() && libraryId) || searchResults.isFetching
@@ -182,7 +217,8 @@ function SearchPage() {
 					{searchResults.data.debug.totalVectors} vectors (
 					{searchResults.data.debug.dimensions}d) | embed:{" "}
 					{searchResults.data.debug.embedMs}ms | search:{" "}
-					{searchResults.data.debug.searchMs}ms
+					{searchResults.data.debug.searchMs}ms | embedder:{" "}
+					{searchResults.data.debug.embedderName}
 				</div>
 			)}
 

@@ -1,15 +1,15 @@
 import { DbService } from "@indecks/db";
 import { chunk as chunkTable } from "@indecks/db/schema/chunk";
-import { library as libraryTable } from "@indecks/db/schema/library";
+import { embedder as embedderTable } from "@indecks/db/schema/embedder";
 import { video as videoTable } from "@indecks/db/schema/video";
 import type { EmbedConfig } from "@indecks/pipeline/embedder";
 import { EmbedService } from "@indecks/pipeline/embedder";
 import {
+	EmbedderNotFoundError,
 	LibraryEmbeddingNotConfiguredError,
-	LibraryNotFoundError,
 } from "@indecks/pipeline/errors";
 import { VectorDbManagerService } from "@indecks/vector";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { z } from "zod";
 
@@ -22,6 +22,7 @@ export const searchRouter = router({
 			z.object({
 				query: z.string().min(1),
 				libraryId: z.string().min(1),
+				embedderId: z.string().optional(),
 				limit: z.number().min(1).max(50).default(10),
 			})
 		)
@@ -33,40 +34,69 @@ export const searchRouter = router({
 					const vectorDbManager = yield* VectorDbManagerService;
 					const embedSvc = yield* EmbedService;
 
-					const lib = yield* Effect.promise(() =>
-						db
-							.select()
-							.from(libraryTable)
-							.where(eq(libraryTable.id, input.libraryId))
-							.get()
-					);
+					let emb: typeof embedderTable.$inferSelect | undefined;
 
-					if (!lib) {
-						return yield* new LibraryNotFoundError({
-							libraryId: input.libraryId,
-						});
-					}
-
-					if (
-						!(
-							lib.embeddingBaseUrl &&
-							lib.embeddingModel &&
-							lib.embeddingDimensions
-						)
-					) {
-						return yield* new LibraryEmbeddingNotConfiguredError({
-							libraryId: input.libraryId,
-						});
+					if (input.embedderId) {
+						const embedderId = input.embedderId;
+						const row = yield* Effect.promise(() =>
+							db
+								.select()
+								.from(embedderTable)
+								.where(
+									and(
+										eq(embedderTable.id, embedderId),
+										eq(embedderTable.libraryId, input.libraryId)
+									)
+								)
+								.get()
+						);
+						if (!row) {
+							return yield* new EmbedderNotFoundError({
+								embedderId,
+							});
+						}
+						emb = row;
+					} else {
+						const row = yield* Effect.promise(() =>
+							db
+								.select()
+								.from(embedderTable)
+								.where(
+									and(
+										eq(embedderTable.libraryId, input.libraryId),
+										eq(embedderTable.isDefault, true)
+									)
+								)
+								.get()
+						);
+						if (row) {
+							emb = row;
+						} else {
+							const first = yield* Effect.promise(() =>
+								db
+									.select()
+									.from(embedderTable)
+									.where(eq(embedderTable.libraryId, input.libraryId))
+									.limit(1)
+									.get()
+							);
+							if (!first) {
+								return yield* new LibraryEmbeddingNotConfiguredError({
+									libraryId: input.libraryId,
+								});
+							}
+							emb = first;
+						}
 					}
 
 					const embedConfig: EmbedConfig = {
-						baseUrl: lib.embeddingBaseUrl,
-						apiKey: lib.embeddingApiKey ?? "",
-						model: lib.embeddingModel,
-						dimensions: lib.embeddingDimensions,
+						baseUrl: emb.baseUrl,
+						apiKey: emb.apiKey ?? "",
+						model: emb.model,
+						dimensions: emb.dimensions,
 					};
 
-					const instruction = lib.embeddingInstruction ?? undefined;
+					const instruction = emb.instruction ?? undefined;
 
 					const t0 = performance.now();
 					const queryEmbedding = yield* embedSvc.embedText(
@@ -78,7 +108,8 @@ export const searchRouter = router({
 
 					const vectorDb = yield* vectorDbManager.get(
 						input.libraryId,
-						lib.embeddingDimensions
+						emb.id,
+						emb.dimensions
 					);
 					const totalVectors = yield* vectorDb.count();
 
@@ -97,6 +128,8 @@ export const searchRouter = router({
 								searchMs,
 								totalVectors,
 								dimensions: queryEmbedding.length,
+								embedderId: emb.id,
+								embedderName: emb.name,
 							},
 						};
 					}
@@ -149,6 +182,8 @@ export const searchRouter = router({
 							searchMs,
 							totalVectors,
 							dimensions: queryEmbedding.length,
+							embedderId: emb.id,
+							embedderName: emb.name,
 						},
 					};
 				})

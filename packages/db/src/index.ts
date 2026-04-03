@@ -13,6 +13,7 @@ import {
 	verification,
 } from "./schema/auth";
 import { chunk, chunkRelations } from "./schema/chunk";
+import { embedder, embedderRelations } from "./schema/embedder";
 import { job } from "./schema/job";
 import { library, libraryRelations } from "./schema/library";
 import { video, videoRelations } from "./schema/video";
@@ -25,6 +26,8 @@ const schema = {
 	user,
 	userRelations,
 	verification,
+	embedder,
+	embedderRelations,
 	library,
 	libraryRelations,
 	video,

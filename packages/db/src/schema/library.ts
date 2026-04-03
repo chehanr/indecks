@@ -1,6 +1,7 @@
 import { relations, sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+import { embedder } from "./embedder";
 import { video } from "./video";
 
 export const library = sqliteTable(
@@ -14,14 +15,6 @@ export const library = sqliteTable(
 		})
 			.default("idle")
 			.notNull(),
-		embeddingInstruction: text("embedding_instruction"),
-		embeddingBaseUrl: text("embedding_base_url"),
-		embeddingApiKey: text("embedding_api_key"),
-		embeddingModel: text("embedding_model"),
-		embeddingDimensions: integer("embedding_dimensions"),
-		chunkDuration: integer("chunk_duration").default(30).notNull(),
-		chunkOverlap: integer("chunk_overlap").default(5).notNull(),
-		downscaleFps: integer("downscale_fps").default(5).notNull(),
 		videoCount: integer("video_count").default(0).notNull(),
 		createdAt: integer("created_at", { mode: "timestamp_ms" })
 			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
@@ -36,4 +29,5 @@ export const library = sqliteTable(
 
 export const libraryRelations = relations(library, ({ many }) => ({
 	videos: many(video),
+	embedders: many(embedder),
 }));

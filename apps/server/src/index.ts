@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
 
@@ -7,6 +7,7 @@ import { createTrpcContext, makeAppLayer } from "@indecks/api/context";
 import { appRouter } from "@indecks/api/routers/index";
 import { AuthService } from "@indecks/auth";
 import { DbService } from "@indecks/db";
+import { embedder as embedderTable } from "@indecks/db/schema/embedder";
 import { library as libraryTable } from "@indecks/db/schema/library";
 import { env } from "@indecks/env/server";
 import { JobQueueService } from "@indecks/pipeline/queue";
@@ -23,6 +24,34 @@ mkdirSync(vectorDbDir, { recursive: true });
 
 const appLayer = makeAppLayer(vectorDbDir);
 const appRuntime = ManagedRuntime.make(appLayer);
+
+// One-time migration: rename vector-${libraryId}.db → vector-${libraryId}-${embedderId}.db
+await appRuntime.runPromise(
+	Effect.gen(function* () {
+		const db = yield* DbService;
+		const embedders = yield* Effect.promise(() =>
+			db.select().from(embedderTable).all()
+		);
+		for (const emb of embedders) {
+			const oldPath = resolve(vectorDbDir, `vector-${emb.libraryId}.db`);
+			const newPath = resolve(
+				vectorDbDir,
+				`vector-${emb.libraryId}-${emb.id}.db`
+			);
+			if (existsSync(oldPath) && !existsSync(newPath)) {
+				renameSync(oldPath, newPath);
+				for (const suffix of ["-wal", "-shm"]) {
+					if (existsSync(`${oldPath}${suffix}`)) {
+						renameSync(`${oldPath}${suffix}`, `${newPath}${suffix}`);
+					}
+				}
+				console.info(
+					`Migrated vector DB: ${emb.libraryId} → ${emb.libraryId}-${emb.id}`
+				);
+			}
+		}
+	})
+);
 
 const workerFiber = await appRuntime.runPromise(
 	Effect.gen(function* () {

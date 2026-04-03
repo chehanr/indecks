@@ -1,18 +1,18 @@
 import { access } from "node:fs/promises";
 import { DbService } from "@indecks/db";
 import { chunk as chunkTable } from "@indecks/db/schema/chunk";
+import { embedder as embedderTable } from "@indecks/db/schema/embedder";
 import { job as jobTable } from "@indecks/db/schema/job";
 import { library as libraryTable } from "@indecks/db/schema/library";
 import { video as videoTable } from "@indecks/db/schema/video";
-import { EmbedService } from "@indecks/pipeline/embedder";
 import {
+	EmbedderNotFoundError,
 	FolderNotAccessibleError,
-	LibraryEmbeddingNotConfiguredError,
 	LibraryNotFoundError,
 	VideoNotFoundError,
 } from "@indecks/pipeline/errors";
 import { VectorDbManagerService } from "@indecks/vector";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Effect } from "effect";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -62,14 +62,6 @@ export const libraryRouter = router({
 			z.object({
 				name: z.string().min(1),
 				folderPath: z.string().min(1),
-				embeddingInstruction: z.string().trim().optional(),
-				embeddingBaseUrl: z.string().trim().min(1),
-				embeddingApiKey: z.string().trim().optional(),
-				embeddingModel: z.string().trim().min(1),
-				embeddingDimensions: z.number().min(1),
-				chunkDuration: z.number().min(1).default(30),
-				chunkOverlap: z.number().min(0).default(5),
-				downscaleFps: z.number().min(1).default(5),
 			})
 		)
 		.mutation(({ ctx, input }) =>
@@ -92,14 +84,6 @@ export const libraryRouter = router({
 							id,
 							name: input.name,
 							folderPath: input.folderPath,
-							embeddingInstruction: input.embeddingInstruction || null,
-							embeddingBaseUrl: input.embeddingBaseUrl,
-							embeddingApiKey: input.embeddingApiKey || null,
-							embeddingModel: input.embeddingModel,
-							embeddingDimensions: input.embeddingDimensions,
-							chunkDuration: input.chunkDuration,
-							chunkOverlap: input.chunkOverlap,
-							downscaleFps: input.downscaleFps,
 						})
 					);
 
@@ -112,14 +96,8 @@ export const libraryRouter = router({
 		.input(
 			z.object({
 				id: z.string(),
-				embeddingInstruction: z.string().trim().optional(),
-				embeddingBaseUrl: z.string().trim().min(1).optional(),
-				embeddingApiKey: z.string().trim().optional(),
-				embeddingModel: z.string().trim().min(1).optional(),
-				embeddingDimensions: z.number().min(1).optional(),
-				chunkDuration: z.number().min(1).optional(),
-				chunkOverlap: z.number().min(0).optional(),
-				downscaleFps: z.number().min(1).optional(),
+				name: z.string().min(1).optional(),
+				folderPath: z.string().min(1).optional(),
 			})
 		)
 		.mutation(({ ctx, input }) =>
@@ -130,29 +108,18 @@ export const libraryRouter = router({
 					const { id, ...fields } = input;
 					const set: Record<string, unknown> = {};
 
-					if (fields.embeddingInstruction !== undefined) {
-						set.embeddingInstruction = fields.embeddingInstruction || null;
+					if (fields.name !== undefined) {
+						set.name = fields.name;
 					}
-					if (fields.embeddingBaseUrl !== undefined) {
-						set.embeddingBaseUrl = fields.embeddingBaseUrl;
-					}
-					if (fields.embeddingApiKey !== undefined) {
-						set.embeddingApiKey = fields.embeddingApiKey || null;
-					}
-					if (fields.embeddingModel !== undefined) {
-						set.embeddingModel = fields.embeddingModel;
-					}
-					if (fields.embeddingDimensions !== undefined) {
-						set.embeddingDimensions = fields.embeddingDimensions;
-					}
-					if (fields.chunkDuration !== undefined) {
-						set.chunkDuration = fields.chunkDuration;
-					}
-					if (fields.chunkOverlap !== undefined) {
-						set.chunkOverlap = fields.chunkOverlap;
-					}
-					if (fields.downscaleFps !== undefined) {
-						set.downscaleFps = fields.downscaleFps;
+					if (fields.folderPath !== undefined) {
+						yield* Effect.tryPromise({
+							try: () => access(fields.folderPath as string),
+							catch: () =>
+								new FolderNotAccessibleError({
+									path: fields.folderPath as string,
+								}),
+						});
+						set.folderPath = fields.folderPath;
 					}
 
 					yield* Effect.promise(() =>
@@ -182,7 +149,7 @@ export const libraryRouter = router({
 		),
 
 	startIndexing: protectedProcedure
-		.input(z.object({ id: z.string() }))
+		.input(z.object({ id: z.string(), embedderId: z.string().min(1) }))
 		.mutation(({ ctx, input }) =>
 			runEffect(
 				ctx.runtime,
@@ -202,15 +169,17 @@ export const libraryRouter = router({
 						});
 					}
 
-					if (
-						!(
-							lib.embeddingBaseUrl &&
-							lib.embeddingModel &&
-							lib.embeddingDimensions
-						)
-					) {
-						return yield* new LibraryEmbeddingNotConfiguredError({
-							libraryId: input.id,
+					const emb = yield* Effect.promise(() =>
+						db
+							.select()
+							.from(embedderTable)
+							.where(eq(embedderTable.id, input.embedderId))
+							.get()
+					);
+
+					if (!emb) {
+						return yield* new EmbedderNotFoundError({
+							embedderId: input.embedderId,
 						});
 					}
 
@@ -220,6 +189,7 @@ export const libraryRouter = router({
 							id: jobId,
 							type: "index_library",
 							libraryId: input.id,
+							embedderId: input.embedderId,
 							status: "pending",
 						})
 					);
@@ -230,7 +200,7 @@ export const libraryRouter = router({
 		),
 
 	reindexVideo: protectedProcedure
-		.input(z.object({ videoId: z.string() }))
+		.input(z.object({ videoId: z.string(), embedderId: z.string().min(1) }))
 		.mutation(({ ctx, input }) =>
 			runEffect(
 				ctx.runtime,
@@ -252,17 +222,17 @@ export const libraryRouter = router({
 						});
 					}
 
-					const lib = yield* Effect.promise(() =>
+					const emb = yield* Effect.promise(() =>
 						db
 							.select()
-							.from(libraryTable)
-							.where(eq(libraryTable.id, vid.libraryId))
+							.from(embedderTable)
+							.where(eq(embedderTable.id, input.embedderId))
 							.get()
 					);
 
-					if (!lib?.embeddingDimensions) {
-						return yield* new LibraryEmbeddingNotConfiguredError({
-							libraryId: vid.libraryId,
+					if (!emb) {
+						return yield* new EmbedderNotFoundError({
+							embedderId: input.embedderId,
 						});
 					}
 
@@ -270,19 +240,31 @@ export const libraryRouter = router({
 						db
 							.select({ id: chunkTable.id })
 							.from(chunkTable)
-							.where(eq(chunkTable.videoId, input.videoId))
+							.where(
+								and(
+									eq(chunkTable.videoId, input.videoId),
+									eq(chunkTable.embedderId, input.embedderId)
+								)
+							)
 							.all()
 					);
 
-					const chunkIds = chunks.map((c) => c.id);
-					if (chunkIds.length > 0) {
+					if (chunks.length > 0) {
 						const vectorDb = yield* vectorDbManager.get(
 							vid.libraryId,
-							lib.embeddingDimensions
+							emb.id,
+							emb.dimensions
 						);
-						yield* vectorDb.removeByChunkIds(chunkIds);
+						yield* vectorDb.removeByChunkIds(chunks.map((c) => c.id));
 						yield* Effect.promise(() =>
-							db.delete(chunkTable).where(eq(chunkTable.videoId, input.videoId))
+							db
+								.delete(chunkTable)
+								.where(
+									and(
+										eq(chunkTable.videoId, input.videoId),
+										eq(chunkTable.embedderId, input.embedderId)
+									)
+								)
 						);
 					}
 
@@ -300,6 +282,7 @@ export const libraryRouter = router({
 							type: "index_video",
 							videoId: input.videoId,
 							libraryId: vid.libraryId,
+							embedderId: input.embedderId,
 							status: "pending",
 						})
 					);
@@ -316,37 +299,51 @@ export const libraryRouter = router({
 				ctx.runtime,
 				Effect.gen(function* () {
 					const db = yield* DbService;
-					return yield* Effect.promise(() =>
+					const videos = yield* Effect.promise(() =>
 						db
 							.select()
 							.from(videoTable)
 							.where(eq(videoTable.libraryId, input.libraryId))
 							.all()
 					);
-				})
-			)
-		),
 
-	testEmbedding: protectedProcedure
-		.input(
-			z.object({
-				embeddingBaseUrl: z.string().trim().min(1),
-				embeddingApiKey: z.string().trim(),
-				embeddingModel: z.string().trim().min(1),
-				embeddingDimensions: z.number().min(1).default(768),
-			})
-		)
-		.mutation(({ ctx, input }) =>
-			runEffect(
-				ctx.runtime,
-				Effect.gen(function* () {
-					const embedSvc = yield* EmbedService;
-					return yield* embedSvc.testConnection({
-						baseUrl: input.embeddingBaseUrl,
-						apiKey: input.embeddingApiKey,
-						model: input.embeddingModel,
-						dimensions: input.embeddingDimensions,
-					});
+					const chunkCounts = yield* Effect.promise(() =>
+						db
+							.select({
+								videoId: chunkTable.videoId,
+								embedderId: chunkTable.embedderId,
+							})
+							.from(chunkTable)
+							.where(eq(chunkTable.embeddingStatus, "embedded"))
+							.all()
+					);
+
+					const embedders = yield* Effect.promise(() =>
+						db
+							.select({ id: embedderTable.id, name: embedderTable.name })
+							.from(embedderTable)
+							.where(eq(embedderTable.libraryId, input.libraryId))
+							.all()
+					);
+					const embedderNames = new Map(embedders.map((e) => [e.id, e.name]));
+
+					const videoEmbedders = new Map<string, string[]>();
+					for (const row of chunkCounts) {
+						const name = embedderNames.get(row.embedderId);
+						if (!name) {
+							continue;
+						}
+						const list = videoEmbedders.get(row.videoId) ?? [];
+						if (!list.includes(name)) {
+							list.push(name);
+						}
+						videoEmbedders.set(row.videoId, list);
+					}
+
+					return videos.map((v) => ({
+						...v,
+						indexedBy: videoEmbedders.get(v.id) ?? [],
+					}));
 				})
 			)
 		),
