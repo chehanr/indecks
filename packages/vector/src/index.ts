@@ -16,6 +16,7 @@ const SQLITE_LIB_PATHS = [
 	"/usr/local/opt/sqlite3/lib/libsqlite3.dylib",
 	"/usr/lib/x86_64-linux-gnu/libsqlite3.so",
 	"/usr/lib/libsqlite3.so",
+	"/usr/lib/libsqlite3.so.0",
 ];
 
 const loadCustomSQLite = Effect.try({

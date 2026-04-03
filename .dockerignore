@@ -1,0 +1,11 @@
+node_modules
+.git
+.turbo
+dist
+*.db
+*.db-wal
+*.db-shm
+vector-data
+test-vids
+.env*
+.claude

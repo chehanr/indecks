@@ -16,6 +16,7 @@ import {
 	setJobProgressCallback,
 } from "@indecks/pipeline/queue";
 import { VectorDbManagerService } from "@indecks/vector";
+import { migrate } from "drizzle-orm/libsql/migrator";
 import { Effect, Fiber, ManagedRuntime } from "effect";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -28,6 +29,18 @@ mkdirSync(vectorDbDir, { recursive: true });
 
 const appLayer = makeAppLayer(vectorDbDir);
 const appRuntime = ManagedRuntime.make(appLayer);
+
+// Run database migrations in production (Docker)
+if (env.NODE_ENV === "production") {
+	const migrationsFolder = resolve(import.meta.dir, "../../../migrations");
+	await appRuntime.runPromise(
+		Effect.gen(function* () {
+			const db = yield* DbService;
+			yield* Effect.promise(() => migrate(db, { migrationsFolder }));
+			console.info("Database migrations applied");
+		})
+	);
+}
 
 // One-time migration: rename vector-${libraryId}.db → vector-${libraryId}-${indexerId}.db
 await appRuntime.runPromise(
@@ -172,9 +185,15 @@ app.get("/api/video", async (c) => {
 	});
 });
 
-app.get("/", (c) => {
-	return c.text("OK");
-});
+app.get("/healthz", (c) => c.text("OK"));
+
+if (env.NODE_ENV === "production") {
+	const { serveStatic } = await import("hono/bun");
+	app.use("/assets/*", serveStatic({ root: "./public" }));
+	app.get("*", serveStatic({ root: "./public", path: "index.html" }));
+} else {
+	app.get("/", (c) => c.text("OK"));
+}
 
 const shutdown = async () => {
 	console.info("Shutting down...");
