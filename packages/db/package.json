@@ -19,7 +19,7 @@
   "dependencies": {
     "@indecks/env": "workspace:*",
     "@libsql/client": "catalog:",
-    "drizzle-orm": "^0.45.1",
+    "drizzle-orm": "catalog:",
     "effect": "catalog:"
   },
   "devDependencies": {

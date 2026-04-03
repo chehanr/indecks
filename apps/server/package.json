@@ -18,6 +18,7 @@
     "@indecks/env": "workspace:*",
     "@indecks/pipeline": "workspace:*",
     "@indecks/vector": "workspace:*",
+    "drizzle-orm": "catalog:",
     "effect": "catalog:",
     "hono": "catalog:"
   },

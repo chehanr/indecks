@@ -10,7 +10,7 @@
     "@effect/platform": "catalog:",
     "@indecks/db": "workspace:*",
     "@indecks/vector": "workspace:*",
-    "drizzle-orm": "^0.45.2",
+    "drizzle-orm": "catalog:",
     "effect": "catalog:",
     "nanoid": "^5.1.5"
   },
