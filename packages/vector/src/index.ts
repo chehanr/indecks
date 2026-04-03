@@ -11,6 +11,8 @@ import {
 	VectorDbError,
 } from "./errors";
 
+const EXT_SUFFIX_RE = /\.(so|dylib|dll)$/;
+
 const SQLITE_LIB_PATHS = [
 	"/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib",
 	"/usr/local/opt/sqlite3/lib/libsqlite3.dylib",
@@ -69,7 +71,8 @@ const makeVectorDb = (
 	Effect.try({
 		try: () => {
 			const db = new Database(dbPath);
-			db.loadExtension(getLoadablePath());
+			const vecPath = getLoadablePath();
+			db.loadExtension(vecPath.replace(EXT_SUFFIX_RE, ""));
 			db.exec("PRAGMA journal_mode=WAL");
 			db.exec(
 				`CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
