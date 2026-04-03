@@ -51,6 +51,10 @@ RUN mkdir -p node_modules/@libsql && \
       [ -d node_modules/.bun/node_modules/@libsql/$arch ] && \
         ln -sf ../.bun/node_modules/@libsql/$arch node_modules/@libsql/$arch; \
     done; true
+RUN for pkg in sqlite-vec-linux-x64 sqlite-vec-linux-arm64; do \
+      [ -d node_modules/.bun/node_modules/$pkg ] && \
+        ln -sf .bun/node_modules/$pkg node_modules/$pkg; \
+    done; true
 COPY --from=build /app/apps/server/dist ./apps/server/dist
 COPY --from=build /app/apps/web/dist ./apps/server/public
 COPY --from=build /app/packages/db/src/migrations ./migrations
