@@ -61,8 +61,12 @@ const claimNextJob = (db: Db) =>
 
 			return claimed ?? null;
 		},
-		catch: () => null,
-	}).pipe(Effect.catchAll(() => Effect.succeed(null)));
+		catch: (e) => e,
+	}).pipe(
+		Effect.catchAll((err) =>
+			Effect.logWarning(`Job claim failed: ${err}`).pipe(Effect.as(null))
+		)
+	);
 
 const updateJobProgress = (
 	jobId: string,
@@ -91,7 +95,9 @@ const completeJob = (db: Db, jobId: string, jobType?: string) =>
 				onJobProgress?.(jobId, "completed", 100, message, null)
 			);
 		}),
-		Effect.ignore
+		Effect.catchAll((err) =>
+			Effect.logError(`Failed to complete job ${jobId}: ${err}`)
+		)
 	);
 
 const failJob = (db: Db, jobId: string, error: string) =>
@@ -108,7 +114,9 @@ const failJob = (db: Db, jobId: string, error: string) =>
 		Effect.tap(() =>
 			Effect.sync(() => onJobProgress?.(jobId, "failed", 0, null, error))
 		),
-		Effect.ignore
+		Effect.catchAll((err) =>
+			Effect.logError(`Failed to mark job ${jobId} as failed: ${err}`)
+		)
 	);
 
 const resolveLibraryId = (
@@ -246,7 +254,13 @@ export const JobQueueServiceLive = Layer.effect(
 					}
 
 					return result.rowsAffected;
-				}).pipe(Effect.catchAll(() => Effect.succeed(0))),
+				}).pipe(
+					Effect.catchAll((err) =>
+						Effect.logError(`Stale job recovery failed: ${err}`).pipe(
+							Effect.as(0)
+						)
+					)
+				),
 
 			startWorker: (db, vectorDbManager) =>
 				Effect.gen(function* () {

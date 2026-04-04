@@ -275,7 +275,13 @@ export const VectorDbManagerServiceLive = (dir: string) =>
 					const filePrefix = `vector-${libraryId}-`;
 					const files = yield* fsService
 						.readDirectory(dir)
-						.pipe(Effect.catchAll(() => Effect.succeed([] as string[])));
+						.pipe(
+							Effect.catchAll((err) =>
+								Effect.logWarning(`Vector DB dir read failed: ${err}`).pipe(
+									Effect.as([] as string[])
+								)
+							)
+						);
 					for (const file of files) {
 						if (
 							file.startsWith(filePrefix) &&

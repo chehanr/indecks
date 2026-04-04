@@ -345,136 +345,114 @@ export const ProcessorServiceLive = Layer.effect(
 
 				const chunks = yield* ffmpeg
 					.chunkVideo(vid.filePath, chunkOpts)
-					.pipe(Effect.catchAll(() => Effect.succeed([])));
+					.pipe(
+						Effect.catchAll((err) =>
+							Effect.logError(
+								`Chunking failed for ${vid.fileName}: ${err}`
+							).pipe(Effect.as([]))
+						)
+					);
 
 				const totalChunks = chunks.length;
 				let processed = 0;
 
+				const processChunk = (
+					chunkInfo: (typeof chunks)[number]
+				): Effect.Effect<void, JobCancelledError | Error> =>
+					Effect.gen(function* () {
+						yield* checkCancelled(db, ctx.jobId);
+						const chunkId = makeChunkId(
+							vid.id,
+							ctx.indexerId,
+							chunkInfo.startTime
+						);
+						const still = yield* ffmpeg.isStillFrame(chunkInfo.chunkPath);
+
+						yield* Effect.promise(() =>
+							db
+								.insert(chunkTable)
+								.values({
+									id: chunkId,
+									videoId: vid.id,
+									indexerId: ctx.indexerId,
+									startTime: chunkInfo.startTime,
+									endTime: chunkInfo.endTime,
+									isStillFrame: still,
+									embeddingStatus: still ? "skipped" : "pending",
+								})
+								.onConflictDoNothing()
+						);
+
+						if (still) {
+							return;
+						}
+
+						const downscaledPath = yield* ffmpeg.downscaleChunk(
+							chunkInfo.chunkPath,
+							{ fps: ctx.downscaleFps }
+						);
+						const videoBytes = yield* fs
+							.readFile(downscaledPath)
+							.pipe(Effect.orDie);
+						const embedding = yield* embedSvc.embedVideo(
+							Buffer.from(videoBytes),
+							ctx.config,
+							ctx.instruction
+						);
+						yield* ctx.vectorDb.upsert(chunkId, new Float32Array(embedding));
+						yield* Effect.promise(() =>
+							db
+								.update(chunkTable)
+								.set({ embeddingStatus: "embedded" })
+								.where(eq(chunkTable.id, chunkId))
+						);
+						yield* fs.remove(downscaledPath).pipe(Effect.ignore);
+					});
+
+				const markChunkError = (
+					chunkInfo: (typeof chunks)[number],
+					err: unknown
+				): Effect.Effect<void> => {
+					const chunkId = makeChunkId(
+						vid.id,
+						ctx.indexerId,
+						chunkInfo.startTime
+					);
+					return Effect.logError(
+						`Chunk error [${vid.fileName} @ ${chunkInfo.startTime}s]: ${err}`
+					).pipe(
+						Effect.flatMap(() =>
+							Effect.promise(() =>
+								db
+									.update(chunkTable)
+									.set({ embeddingStatus: "error" })
+									.where(eq(chunkTable.id, chunkId))
+							)
+						),
+						Effect.ignore
+					);
+				};
+
 				yield* Effect.forEach(
 					chunks,
 					(chunkInfo) =>
-						Effect.gen(function* () {
-							yield* checkCancelled(db, ctx.jobId);
-							const chunkId = makeChunkId(
-								vid.id,
-								ctx.indexerId,
-								chunkInfo.startTime
-							);
-							const still = yield* ffmpeg.isStillFrame(chunkInfo.chunkPath);
-
-							yield* Effect.promise(() =>
-								db
-									.insert(chunkTable)
-									.values({
-										id: chunkId,
-										videoId: vid.id,
-										indexerId: ctx.indexerId,
-										startTime: chunkInfo.startTime,
-										endTime: chunkInfo.endTime,
-										isStillFrame: still,
-										embeddingStatus: still ? "skipped" : "pending",
-									})
-									.onConflictDoNothing()
-							);
-
-							if (still) {
+						processChunk(chunkInfo).pipe(
+							Effect.timeout(Duration.minutes(5)),
+							Effect.catchIf(
+								(e): e is JobCancelledError => e instanceof JobCancelledError,
+								(e) => Effect.fail(e)
+							),
+							Effect.catchAll((err) => markChunkError(chunkInfo, err)),
+							Effect.catchAllDefect((err) => markChunkError(chunkInfo, err)),
+							Effect.tap(() => {
 								processed++;
 								const pct = Math.round((processed / totalChunks) * 100);
-								yield* progress(
+								return progress(
 									onProgress,
 									pct,
-									`${vid.fileName} — Chunk ${processed}/${totalChunks} (skipped)`
+									`${vid.fileName} — Chunk ${processed}/${totalChunks}`
 								);
-								return;
-							}
-
-							const downscaledPath = yield* ffmpeg
-								.downscaleChunk(chunkInfo.chunkPath, {
-									fps: ctx.downscaleFps,
-								})
-								.pipe(Effect.catchAll(() => Effect.succeed(null)));
-
-							if (downscaledPath) {
-								const videoBytes = yield* fs
-									.readFile(downscaledPath)
-									.pipe(Effect.orDie);
-								const videoBuffer = Buffer.from(videoBytes);
-
-								const embeddingResult = yield* embedSvc
-									.embedVideo(videoBuffer, ctx.config, ctx.instruction)
-									.pipe(Effect.either);
-
-								if (embeddingResult._tag === "Right") {
-									yield* ctx.vectorDb
-										.upsert(chunkId, new Float32Array(embeddingResult.right))
-										.pipe(
-											Effect.flatMap(() =>
-												Effect.promise(() =>
-													db
-														.update(chunkTable)
-														.set({ embeddingStatus: "embedded" })
-														.where(eq(chunkTable.id, chunkId))
-												)
-											),
-											Effect.catchAll(() =>
-												Effect.promise(() =>
-													db
-														.update(chunkTable)
-														.set({ embeddingStatus: "error" })
-														.where(eq(chunkTable.id, chunkId))
-												)
-											)
-										);
-								} else {
-									yield* Effect.promise(() =>
-										db
-											.update(chunkTable)
-											.set({ embeddingStatus: "error" })
-											.where(eq(chunkTable.id, chunkId))
-									);
-								}
-
-								yield* fs.remove(downscaledPath).pipe(Effect.ignore);
-							} else {
-								yield* Effect.promise(() =>
-									db
-										.update(chunkTable)
-										.set({ embeddingStatus: "error" })
-										.where(eq(chunkTable.id, chunkId))
-								);
-							}
-
-							processed++;
-							const pct = Math.round((processed / totalChunks) * 100);
-							yield* progress(
-								onProgress,
-								pct,
-								`${vid.fileName} — Chunk ${processed}/${totalChunks}`
-							);
-						}).pipe(
-							Effect.timeout(Duration.minutes(5)),
-							Effect.catchTag("TimeoutException", () =>
-								Effect.gen(function* () {
-									const chunkId = makeChunkId(
-										vid.id,
-										ctx.indexerId,
-										chunkInfo.startTime
-									);
-									yield* Effect.promise(() =>
-										db
-											.update(chunkTable)
-											.set({ embeddingStatus: "error" })
-											.where(eq(chunkTable.id, chunkId))
-									);
-									processed++;
-									const pct = Math.round((processed / totalChunks) * 100);
-									yield* progress(
-										onProgress,
-										pct,
-										`${vid.fileName} — Chunk ${processed}/${totalChunks} (timed out)`
-									);
-								})
-							)
+							})
 						),
 					{ concurrency: 4 }
 				);
@@ -586,16 +564,22 @@ export const ProcessorServiceLive = Layer.effect(
 						.where(eq(videoTable.id, videoId))
 				);
 			}).pipe(
-				Effect.catchAllDefect((err) =>
-					Effect.promise(() => {
-						const errorMessage =
-							err instanceof Error ? err.message : String(err);
-						return db
-							.update(videoTable)
-							.set({ status: "error", errorMessage })
-							.where(eq(videoTable.id, videoId));
-					}).pipe(Effect.asVoid)
-				)
+				Effect.catchAllDefect((err) => {
+					const errorMessage = err instanceof Error ? err.message : String(err);
+					return Effect.logError(
+						`Video processing defect [${videoId}]: ${errorMessage}`
+					).pipe(
+						Effect.flatMap(() =>
+							Effect.promise(() =>
+								db
+									.update(videoTable)
+									.set({ status: "error", errorMessage })
+									.where(eq(videoTable.id, videoId))
+							)
+						),
+						Effect.asVoid
+					);
+				})
 			);
 
 		const indexSingleVideo = (
@@ -622,12 +606,18 @@ export const ProcessorServiceLive = Layer.effect(
 				if (vid.duration === null) {
 					const dur = yield* ffmpeg
 						.getVideoDuration(vid.filePath)
-						.pipe(Effect.option);
-					if (dur._tag === "Some") {
+						.pipe(
+							Effect.catchAll((err) =>
+								Effect.logWarning(
+									`Duration probe failed for ${vid.fileName}: ${err}`
+								).pipe(Effect.as(null))
+							)
+						);
+					if (dur !== null) {
 						yield* Effect.promise(() =>
 							db
 								.update(videoTable)
-								.set({ duration: dur.value })
+								.set({ duration: dur })
 								.where(eq(videoTable.id, vid.id))
 						);
 					}

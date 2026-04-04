@@ -77,7 +77,11 @@ const callEmbeddingApi = (
 
 		if (response.status >= 400) {
 			const text = yield* response.text.pipe(
-				Effect.catchAll(() => Effect.succeed("Failed to read response body"))
+				Effect.catchAll((err) =>
+					Effect.logWarning(`Failed to read error response body: ${err}`).pipe(
+						Effect.as("Failed to read response body")
+					)
+				)
 			);
 			return yield* new EmbeddingApiError({
 				statusCode: response.status,

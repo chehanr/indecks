@@ -343,7 +343,13 @@ export const FFmpegServiceLive = Layer.effect(
 					const videos = yield* findVideos(absDir);
 					videos.sort();
 					return videos;
-				}).pipe(Effect.catchAll(() => Effect.succeed([] as string[]))),
+				}).pipe(
+					Effect.catchAll((err) =>
+						Effect.logError(
+							`Directory scan failed for ${dirPath}: ${err}`
+						).pipe(Effect.as([] as string[]))
+					)
+				),
 
 			cleanupChunks: (chunks) =>
 				Effect.forEach(
