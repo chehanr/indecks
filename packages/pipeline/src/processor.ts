@@ -347,6 +347,8 @@ export const ProcessorServiceLive = Layer.effect(
 				const chunkOpts = {
 					chunkDuration: ctx.chunkDuration,
 					overlap: ctx.chunkOverlap,
+					downscaleFps: ctx.downscaleFps,
+					downscaleHeight: 480,
 				};
 
 				const chunks = yield* ffmpeg
@@ -396,12 +398,8 @@ export const ProcessorServiceLive = Layer.effect(
 							return;
 						}
 
-						const downscaledPath = yield* ffmpeg.downscaleChunk(
-							chunkInfo.chunkPath,
-							{ fps: ctx.downscaleFps }
-						);
 						const videoBytes = yield* fs
-							.readFile(downscaledPath)
+							.readFile(chunkInfo.chunkPath)
 							.pipe(Effect.orDie);
 						const embedding = yield* embedSvc.embedVideo(
 							Buffer.from(videoBytes),
@@ -415,7 +413,6 @@ export const ProcessorServiceLive = Layer.effect(
 								.set({ embeddingStatus: "embedded" })
 								.where(eq(chunkTable.id, chunkId))
 						);
-						yield* fs.remove(downscaledPath).pipe(Effect.ignore);
 					});
 
 				const markChunkError = (

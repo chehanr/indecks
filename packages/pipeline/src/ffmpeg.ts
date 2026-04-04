@@ -8,6 +8,7 @@ import { Context, Effect, Layer } from "effect";
 import { FFmpegError } from "./errors";
 
 const MP4_EXT = /\.mp4$/;
+const FREEZE_DURATION_RE = /freeze_duration:\s*([\d.]+)/;
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm"]);
 
 const findVideos = (dir: string): Effect.Effect<string[]> =>
@@ -30,6 +31,8 @@ export interface ChunkInfo {
 
 export interface ChunkOptions {
 	chunkDuration?: number;
+	downscaleFps?: number;
+	downscaleHeight?: number;
 	overlap?: number;
 }
 
@@ -150,38 +153,17 @@ export const FFmpegServiceLive = Layer.effect(
 		const fs = yield* FileSystem.FileSystem;
 		const executor = yield* CommandExecutor.CommandExecutor;
 
-		const collectFrameSizes = (
-			fsService: typeof fs,
-			tmpDir: string,
-			count: number
-		): Effect.Effect<number[]> =>
-			Effect.gen(function* () {
-				const sizes: number[] = [];
-				for (let i = 0; i < count; i++) {
-					const framePath = join(
-						tmpDir,
-						`frame_${String(i).padStart(3, "0")}.jpg`
-					);
-					const exists = yield* fsService
-						.exists(framePath)
-						.pipe(Effect.orElseSucceed(() => false));
-					if (exists) {
-						const info = yield* fsService.stat(framePath).pipe(Effect.option);
-						if (info._tag === "Some") {
-							sizes.push(Number(info.value.size));
-						}
-					}
-					yield* fsService.remove(framePath).pipe(Effect.ignore);
-				}
-				return sizes;
-			});
-
 		return {
 			getVideoDuration: (filePath) => getVideoDuration(executor, filePath),
 
 			chunkVideo: (filePath, options = {}) =>
 				Effect.gen(function* () {
-					const { chunkDuration = 30, overlap = 5 } = options;
+					const {
+						chunkDuration = 30,
+						overlap = 5,
+						downscaleHeight,
+						downscaleFps,
+					} = options;
 					const absPath = resolve(filePath);
 					const duration = yield* getVideoDuration(executor, absPath);
 					const tmpDir = join(tmpdir(), `indecks_chunks_${Date.now()}`);
@@ -196,23 +178,38 @@ export const FFmpegServiceLive = Layer.effect(
 						)
 					);
 
+					const useDownscale = downscaleHeight || downscaleFps;
+					const codecArgs: string[] = useDownscale
+						? [
+								"-vf",
+								`scale=-2:${downscaleHeight ?? 480},fps=${downscaleFps ?? 5}`,
+								"-c:v",
+								"libx264",
+								"-preset",
+								"ultrafast",
+								"-an",
+							]
+						: ["-c", "copy"];
+
 					const step = chunkDuration - overlap;
 					const chunks: ChunkInfo[] = [];
 
-					if (duration <= chunkDuration) {
-						const chunkPath = join(tmpDir, "chunk_000.mp4");
-						yield* runExitCode(executor, "ffmpeg", [
+					const makeChunk = (start: number, t: number, chunkPath: string) =>
+						runExitCode(executor, "ffmpeg", [
 							"-y",
 							"-ss",
-							"0",
+							String(start),
 							"-i",
 							absPath,
 							"-t",
-							String(duration),
-							"-c",
-							"copy",
+							String(t),
+							...codecArgs,
 							chunkPath,
 						]);
+
+					if (duration <= chunkDuration) {
+						const chunkPath = join(tmpDir, "chunk_000.mp4");
+						yield* makeChunk(0, duration, chunkPath);
 						return [
 							{
 								chunkPath,
@@ -233,18 +230,7 @@ export const FFmpegServiceLive = Layer.effect(
 							`chunk_${String(idx).padStart(3, "0")}.mp4`
 						);
 
-						yield* runExitCode(executor, "ffmpeg", [
-							"-y",
-							"-ss",
-							String(start),
-							"-i",
-							absPath,
-							"-t",
-							String(t),
-							"-c",
-							"copy",
-							chunkPath,
-						]);
+						yield* makeChunk(start, t, chunkPath);
 
 						chunks.push({
 							chunkPath,
@@ -287,11 +273,6 @@ export const FFmpegServiceLive = Layer.effect(
 
 			isStillFrame: (chunkPath, threshold = 0.98) =>
 				Effect.gen(function* () {
-					const tmpDir = join(tmpdir(), `indecks_still_${Date.now()}`);
-					yield* fs
-						.makeDirectory(tmpDir, { recursive: true })
-						.pipe(Effect.ignore);
-
 					const durationResult = yield* getVideoDuration(
 						executor,
 						chunkPath
@@ -301,40 +282,29 @@ export const FFmpegServiceLive = Layer.effect(
 						return false;
 					}
 					const duration = durationResult.value;
-
-					const times = [duration * 0.25, duration * 0.5, duration * 0.75];
-
-					// Extract frames in parallel
-					yield* Effect.forEach(
-						times,
-						(t, idx) =>
-							runExitCode(executor, "ffmpeg", [
-								"-y",
-								"-ss",
-								String(t),
-								"-i",
-								chunkPath,
-								"-frames:v",
-								"1",
-								join(tmpDir, `frame_${String(idx).padStart(3, "0")}.jpg`),
-							]).pipe(Effect.ignore),
-						{ concurrency: 3 }
-					);
-
-					const sizes = yield* collectFrameSizes(fs, tmpDir, 3);
-					yield* fs.remove(tmpDir, { recursive: true }).pipe(Effect.ignore);
-
-					if (sizes.length < 2) {
+					if (duration < 0.5) {
 						return false;
 					}
 
-					const minSize = Math.min(...sizes);
-					const maxSize = Math.max(...sizes);
-					if (maxSize === 0) {
+					// Single-pass freeze detection via ffmpeg filter
+					const output = yield* runString(executor, "ffmpeg", [
+						"-i",
+						chunkPath,
+						"-vf",
+						"freezedetect=n=0.003:d=0.5",
+						"-f",
+						"null",
+						"-",
+					]).pipe(Effect.catchAll(() => Effect.succeed("")));
+
+					// freezedetect outputs freeze_duration in stderr/stdout
+					// If freeze covers >= threshold of total duration, it's a still frame
+					const match = FREEZE_DURATION_RE.exec(output);
+					if (!match?.[1]) {
 						return false;
 					}
-
-					return minSize / maxSize >= threshold;
+					const freezeDuration = Number.parseFloat(match[1]);
+					return freezeDuration / duration >= threshold;
 				}),
 
 			scanDirectory: (dirPath) =>
