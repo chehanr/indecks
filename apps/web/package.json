@@ -27,6 +27,7 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "sonner": "catalog:",
+    "use-debounce": "^10.1.1",
     "zod": "catalog:"
   },
   "devDependencies": {

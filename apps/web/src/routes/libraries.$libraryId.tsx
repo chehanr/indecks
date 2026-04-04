@@ -50,9 +50,10 @@ import {
 } from "@indecks/ui/components/tabs";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
-import { Pencil, Plus, Search, Trash2, X } from "lucide-react";
+import { Pencil, Plus, Trash2, X } from "lucide-react";
 import { parseAsString, useQueryState } from "nuqs";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useDebouncedCallback } from "use-debounce";
 import { toast } from "sonner";
 
 import { authClient } from "@/lib/auth-client";
@@ -1028,6 +1029,15 @@ function SearchTab({ libraryId }: { libraryId: string }) {
 	const defaultIndexer = indexersQuery.data?.find((e) => e.isDefault);
 	const selectedIndexerId = indexerId || defaultIndexer?.id || "";
 
+	const debouncedSearch = useDebouncedCallback((value: string) => {
+		setSearchQuery(value.trim() || null);
+	}, 400);
+
+	const handleInputChange = (value: string) => {
+		setInputValue(value);
+		debouncedSearch(value);
+	};
+
 	const searchResults = useQuery({
 		...trpc.search.query.queryOptions({
 			query: searchQuery,
@@ -1038,33 +1048,15 @@ function SearchTab({ libraryId }: { libraryId: string }) {
 		enabled: searchQuery.length > 0 && selectedIndexerId.length > 0,
 	});
 
-	const handleSearch = (e: React.FormEvent) => {
-		e.preventDefault();
-		setSearchQuery(inputValue.trim() || null);
-	};
-
 	return (
 		<div className="space-y-4">
-			<form className="flex flex-col gap-3" onSubmit={handleSearch}>
-				<div className="flex gap-2">
-					<Input
-						autoComplete="off"
-						className="flex-1"
-						onChange={(e) => setInputValue(e.target.value)}
-						placeholder="Describe what you're looking for..."
-						value={inputValue}
-					/>
-					<Button
-						disabled={
-							!(inputValue.trim() && selectedIndexerId) ||
-							searchResults.isFetching
-						}
-						type="submit"
-					>
-						<Search className="size-4" />
-						{searchResults.isFetching ? "Searching..." : "Search"}
-					</Button>
-				</div>
+			<div className="flex flex-col gap-3">
+				<Input
+					autoComplete="off"
+					onChange={(e) => handleInputChange(e.target.value)}
+					placeholder="Describe what you're looking for..."
+					value={inputValue}
+				/>
 				{indexersQuery.data && indexersQuery.data.length > 0 && (
 					<NativeSelect
 						onChange={(e) => setIndexerId(e.target.value || null)}
@@ -1078,7 +1070,7 @@ function SearchTab({ libraryId }: { libraryId: string }) {
 						))}
 					</NativeSelect>
 				)}
-			</form>
+			</div>
 
 			{searchResults.data?.debug && (
 				<p className="font-mono text-muted-foreground text-xs">
