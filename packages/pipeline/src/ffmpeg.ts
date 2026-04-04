@@ -2,26 +2,20 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { Command, CommandExecutor, FileSystem } from "@effect/platform";
-import type { PlatformError } from "@effect/platform/Error";
 import { Context, Effect, Layer } from "effect";
 
 import { FFmpegError } from "./errors";
 
-const SUPPORTED_EXTENSIONS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm"]);
 const MP4_EXT = /\.mp4$/;
+const VIDEO_GLOB = new Bun.Glob("**/*.{mp4,mov,avi,mkv,webm}");
 
-const findVideos = (
-	fsService: FileSystem.FileSystem,
-	dir: string
-): Effect.Effect<string[], PlatformError> =>
-	Effect.gen(function* () {
-		const entries = yield* fsService.readDirectory(dir, { recursive: true });
-		return entries
-			.filter((entry) => {
-				const ext = entry.slice(entry.lastIndexOf(".")).toLowerCase();
-				return SUPPORTED_EXTENSIONS.has(ext);
-			})
-			.map((entry) => join(dir, entry));
+const findVideos = (dir: string): Effect.Effect<string[]> =>
+	Effect.promise(async () => {
+		const paths: string[] = [];
+		for await (const entry of VIDEO_GLOB.scan({ cwd: dir })) {
+			paths.push(join(dir, entry));
+		}
+		return paths;
 	});
 
 export interface ChunkInfo {
@@ -331,7 +325,7 @@ export const FFmpegServiceLive = Layer.effect(
 			scanDirectory: (dirPath) =>
 				Effect.gen(function* () {
 					const absDir = resolve(dirPath);
-					const videos = yield* findVideos(fs, absDir);
+					const videos = yield* findVideos(absDir);
 					videos.sort();
 					return videos;
 				}).pipe(Effect.catchAll(() => Effect.succeed([] as string[]))),
