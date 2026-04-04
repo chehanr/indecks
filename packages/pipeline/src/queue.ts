@@ -5,7 +5,7 @@ import { library as libraryTable } from "@indecks/db/schema/library";
 import { video as videoTable } from "@indecks/db/schema/video";
 import type { VectorDbManagerShape } from "@indecks/vector";
 import { and, eq, inArray, or } from "drizzle-orm";
-import { Context, Duration, Effect, type Fiber, Layer, Queue } from "effect";
+import { Context, Effect, type Fiber, Layer, Schedule } from "effect";
 import { nanoid } from "nanoid";
 
 import {
@@ -13,7 +13,6 @@ import {
 	JobMissingFieldError,
 	UnknownJobTypeError,
 } from "./errors";
-import { JobNotifyService } from "./notify";
 import { ProcessorService } from "./processor";
 
 export type JobProgressCallback = (
@@ -35,7 +34,6 @@ type ProgressFn = (progress: number, message: string) => Effect.Effect<void>;
 const claimNextJob = (db: Db) =>
 	Effect.tryPromise({
 		try: async () => {
-			console.info("[worker] claimNextJob query...");
 			const pending = await db
 				.select()
 				.from(jobTable)
@@ -149,7 +147,7 @@ export interface JobQueueServiceShape {
 	readonly startWorker: (
 		db: Db,
 		vectorDbManager: VectorDbManagerShape
-	) => Effect.Effect<Fiber.RuntimeFiber<void>, never, JobNotifyService>;
+	) => Effect.Effect<Fiber.RuntimeFiber<void>>;
 }
 
 export class JobQueueService extends Context.Tag("JobQueueService")<
@@ -483,42 +481,20 @@ export const JobQueueServiceLive = Layer.effect(
 							Effect.catchAllDefect((err) => failJobWithError(jobRow, err))
 						);
 
-					const notifyQueue = yield* JobNotifyService;
-
-					const processAvailable = Effect.gen(function* () {
-						let jobRow = yield* claimNextJob(db);
-						while (jobRow) {
+					const pollOnce = Effect.gen(function* () {
+						const jobRow = yield* claimNextJob(db);
+						if (jobRow) {
 							yield* runJob(jobRow);
-							jobRow = yield* claimNextJob(db);
 						}
 					});
 
-					const workerLoop = Effect.gen(function* () {
-						console.info("[worker] loop starting");
-						while (true) {
-							console.info("[worker] claiming...");
-							yield* processAvailable.pipe(
-								Effect.tap(() =>
-									Effect.sync(() => console.info("[worker] processed batch"))
-								),
-								Effect.catchAll((err) =>
-									Effect.sync(() => console.error("[worker] error:", err))
-								),
-								Effect.catchAllDefect((err) =>
-									Effect.sync(() => console.error("[worker] defect:", err))
-								)
-							);
-							// Wait for a signal or poll every 30s as fallback
-							yield* Queue.take(notifyQueue).pipe(
-								Effect.timeout(Duration.seconds(30)),
-								Effect.ignore
-							);
-							// Drain any queued signals to avoid redundant loops
-							yield* Queue.takeAll(notifyQueue).pipe(Effect.ignore);
-						}
-					});
-
-					return yield* workerLoop.pipe(Effect.asVoid, Effect.forkDaemon);
+					return yield* pollOnce.pipe(
+						Effect.catchAll(() => Effect.void),
+						Effect.catchAllDefect(() => Effect.void),
+						Effect.repeat(Schedule.spaced("3 seconds")),
+						Effect.asVoid,
+						Effect.forkDaemon
+					);
 				}),
 		};
 	})
