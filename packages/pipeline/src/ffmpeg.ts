@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { Command, CommandExecutor, FileSystem } from "@effect/platform";
-import { Context, Effect, Layer, Queue } from "effect";
+import { Context, Duration, Effect, Layer, Queue } from "effect";
 
 import { FFmpegError } from "./errors";
 
@@ -42,6 +42,8 @@ export interface DownscaleOptions {
 	height?: number;
 }
 
+const CMD_TIMEOUT = Duration.minutes(2);
+
 const runString = (
 	executor: CommandExecutor.CommandExecutor,
 	cmd: string,
@@ -50,15 +52,27 @@ const runString = (
 	Command.make(cmd, ...args).pipe(
 		Command.string,
 		Effect.provideService(CommandExecutor.CommandExecutor, executor),
-		Effect.catchAll((e) =>
-			Effect.fail(
+		Effect.timeoutFail({
+			duration: CMD_TIMEOUT,
+			onTimeout: () =>
+				new FFmpegError({
+					command: `${cmd} ${args.join(" ")}`,
+					exitCode: -1,
+					stderr: "Command timed out",
+				}),
+		}),
+		Effect.catchAll((e) => {
+			if (e instanceof FFmpegError) {
+				return Effect.fail(e);
+			}
+			return Effect.fail(
 				new FFmpegError({
 					command: `${cmd} ${args.join(" ")}`,
 					exitCode: -1,
 					stderr: String(e),
 				})
-			)
-		)
+			);
+		})
 	);
 
 const runExitCode = (
@@ -80,6 +94,15 @@ const runExitCode = (
 						})
 					)
 		),
+		Effect.timeoutFail({
+			duration: CMD_TIMEOUT,
+			onTimeout: () =>
+				new FFmpegError({
+					command: `${cmd} ${args.join(" ")}`,
+					exitCode: -1,
+					stderr: "Command timed out",
+				}),
+		}),
 		Effect.catchAll((e) => {
 			if (e instanceof FFmpegError) {
 				return Effect.fail(e);

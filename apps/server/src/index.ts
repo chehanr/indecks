@@ -17,7 +17,7 @@ import {
 } from "@indecks/pipeline/queue";
 import { VectorDbManagerService } from "@indecks/vector";
 import { migrate } from "drizzle-orm/libsql/migrator";
-import { Effect, Fiber, ManagedRuntime } from "effect";
+import { Effect, Fiber, ManagedRuntime, Schedule } from "effect";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
@@ -104,8 +104,14 @@ const workerFiber = appRuntime.runFork(
 		yield* Effect.logWarning("Worker fiber exited unexpectedly");
 	}).pipe(
 		Effect.catchAllCause((cause) =>
-			Effect.logError("Worker fiber died").pipe(
-				Effect.annotateLogs("cause", cause.toString())
+			Effect.logError("Worker fiber crashed, restarting...").pipe(
+				Effect.annotateLogs("cause", cause.toString()),
+				Effect.flatMap(() => Effect.fail("worker-crashed" as const))
+			)
+		),
+		Effect.retry(
+			Schedule.exponential("1 second").pipe(
+				Schedule.union(Schedule.spaced("30 seconds"))
 			)
 		),
 		Effect.annotateLogs("component", "worker")

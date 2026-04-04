@@ -1,5 +1,5 @@
 import { HttpClient, HttpClientRequest } from "@effect/platform";
-import { Context, Effect, Layer } from "effect";
+import { Context, Duration, Effect, Layer } from "effect";
 
 import { EmbeddingApiError, EmbeddingEmptyResponseError } from "./errors";
 
@@ -65,14 +65,25 @@ const callEmbeddingApi = (
 		);
 
 		const response = yield* client.execute(request).pipe(
-			Effect.catchAll((e) =>
-				Effect.fail(
+			Effect.timeoutFail({
+				duration: Duration.minutes(3),
+				onTimeout: () =>
+					new EmbeddingApiError({
+						statusCode: 0,
+						body: "Embedding API request timed out after 3 minutes",
+					}),
+			}),
+			Effect.catchAll((e) => {
+				if (e instanceof EmbeddingApiError) {
+					return Effect.fail(e);
+				}
+				return Effect.fail(
 					new EmbeddingApiError({
 						statusCode: 0,
 						body: `Request failed: ${e}`,
 					})
-				)
-			)
+				);
+			})
 		);
 
 		if (response.status >= 400) {
