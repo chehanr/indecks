@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { Command, CommandExecutor, FileSystem } from "@effect/platform";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Queue } from "effect";
 
 import { FFmpegError } from "./errors";
 
@@ -31,6 +31,7 @@ export interface ChunkInfo {
 
 export interface ChunkOptions {
 	chunkDuration?: number;
+	concurrency: number;
 	downscaleFps?: number;
 	downscaleHeight?: number;
 	overlap?: number;
@@ -125,8 +126,16 @@ const getVideoDuration = (
 export interface FFmpegServiceShape {
 	readonly chunkVideo: (
 		filePath: string,
-		options?: ChunkOptions
+		options: ChunkOptions
 	) => Effect.Effect<ChunkInfo[], FFmpegError>;
+	readonly chunkVideoStreamed: (
+		filePath: string,
+		options: ChunkOptions,
+		queue: Queue.Queue<ChunkInfo>
+	) => Effect.Effect<
+		{ produce: Effect.Effect<void, FFmpegError>; total: number },
+		FFmpegError
+	>;
 	readonly cleanupChunks: (chunks: ChunkInfo[]) => Effect.Effect<void>;
 	readonly downscaleChunk: (
 		chunkPath: string,
@@ -157,7 +166,110 @@ export const FFmpegServiceLive = Layer.effect(
 		return {
 			getVideoDuration: (filePath) => getVideoDuration(executor, filePath),
 
-			chunkVideo: (filePath, options = {}) =>
+			chunkVideo: (filePath, options) =>
+				Effect.gen(function* () {
+					const {
+						chunkDuration = 30,
+						overlap = 5,
+						downscaleHeight,
+						downscaleFps,
+						concurrency: chunkConcurrency,
+					} = options;
+					const absPath = resolve(filePath);
+					const duration = yield* getVideoDuration(executor, absPath);
+					const tmpDir = join(tmpdir(), `indecks_chunks_${Date.now()}`);
+					yield* fs.makeDirectory(tmpDir, { recursive: true }).pipe(
+						Effect.mapError(
+							(e) =>
+								new FFmpegError({
+									command: "mkdir tmpdir",
+									exitCode: -1,
+									stderr: String(e),
+								})
+						)
+					);
+
+					const useDownscale = downscaleHeight || downscaleFps;
+					const codecArgs: string[] = useDownscale
+						? [
+								"-vf",
+								`scale=-2:${downscaleHeight ?? 480},fps=${downscaleFps ?? 5}`,
+								"-c:v",
+								"libx264",
+								"-preset",
+								"ultrafast",
+								"-an",
+							]
+						: ["-c", "copy"];
+
+					const step = chunkDuration - overlap;
+
+					const makeChunk = (start: number, t: number, chunkPath: string) =>
+						runExitCode(executor, "ffmpeg", [
+							"-y",
+							"-ss",
+							String(start),
+							"-i",
+							absPath,
+							"-t",
+							String(t),
+							...codecArgs,
+							chunkPath,
+						]);
+
+					// Precompute all chunk specs
+					const specs: Array<{
+						chunkPath: string;
+						endTime: number;
+						startTime: number;
+						t: number;
+					}> = [];
+
+					if (duration <= chunkDuration) {
+						specs.push({
+							startTime: 0,
+							endTime: duration,
+							t: duration,
+							chunkPath: join(tmpDir, "chunk_000.mp4"),
+						});
+					} else {
+						let start = 0;
+						let idx = 0;
+						while (start < duration) {
+							const end = Math.min(start + chunkDuration, duration);
+							specs.push({
+								startTime: start,
+								endTime: end,
+								t: end - start,
+								chunkPath: join(
+									tmpDir,
+									`chunk_${String(idx).padStart(3, "0")}.mp4`
+								),
+							});
+							start += step;
+							idx++;
+							if (start + overlap >= duration) {
+								break;
+							}
+						}
+					}
+
+					// Run ffmpeg in parallel
+					yield* Effect.forEach(
+						specs,
+						(spec) => makeChunk(spec.startTime, spec.t, spec.chunkPath),
+						{ concurrency: chunkConcurrency }
+					);
+
+					return specs.map((spec) => ({
+						chunkPath: spec.chunkPath,
+						sourceFile: absPath,
+						startTime: spec.startTime,
+						endTime: spec.endTime,
+					}));
+				}),
+
+			chunkVideoStreamed: (filePath, options, queue) =>
 				Effect.gen(function* () {
 					const {
 						chunkDuration = 30,
@@ -193,61 +305,72 @@ export const FFmpegServiceLive = Layer.effect(
 						: ["-c", "copy"];
 
 					const step = chunkDuration - overlap;
-					const chunks: ChunkInfo[] = [];
 
-					const makeChunk = (start: number, t: number, chunkPath: string) =>
-						runExitCode(executor, "ffmpeg", [
-							"-y",
-							"-ss",
-							String(start),
-							"-i",
-							absPath,
-							"-t",
-							String(t),
-							...codecArgs,
-							chunkPath,
-						]);
+					// Precompute chunk specs to know total count upfront
+					const specs: Array<{
+						chunkPath: string;
+						endTime: number;
+						startTime: number;
+						t: number;
+					}> = [];
 
 					if (duration <= chunkDuration) {
-						const chunkPath = join(tmpDir, "chunk_000.mp4");
-						yield* makeChunk(0, duration, chunkPath);
-						return [
-							{
-								chunkPath,
-								sourceFile: absPath,
-								startTime: 0,
-								endTime: duration,
-							},
-						];
-					}
-
-					let start = 0;
-					let idx = 0;
-					while (start < duration) {
-						const end = Math.min(start + chunkDuration, duration);
-						const t = end - start;
-						const chunkPath = join(
-							tmpDir,
-							`chunk_${String(idx).padStart(3, "0")}.mp4`
-						);
-
-						yield* makeChunk(start, t, chunkPath);
-
-						chunks.push({
-							chunkPath,
-							sourceFile: absPath,
-							startTime: start,
-							endTime: end,
+						specs.push({
+							startTime: 0,
+							endTime: duration,
+							t: duration,
+							chunkPath: join(tmpDir, "chunk_000.mp4"),
 						});
-
-						start += step;
-						idx++;
-						if (start + overlap >= duration) {
-							break;
+					} else {
+						let start = 0;
+						let idx = 0;
+						while (start < duration) {
+							const end = Math.min(start + chunkDuration, duration);
+							specs.push({
+								startTime: start,
+								endTime: end,
+								t: end - start,
+								chunkPath: join(
+									tmpDir,
+									`chunk_${String(idx).padStart(3, "0")}.mp4`
+								),
+							});
+							start += step;
+							idx++;
+							if (start + overlap >= duration) {
+								break;
+							}
 						}
 					}
 
-					return chunks;
+					// Return total count and a produce effect that creates chunks sequentially
+					const produce = Effect.forEach(
+						specs,
+						(spec) =>
+							runExitCode(executor, "ffmpeg", [
+								"-y",
+								"-ss",
+								String(spec.startTime),
+								"-i",
+								absPath,
+								"-t",
+								String(spec.t),
+								...codecArgs,
+								spec.chunkPath,
+							]).pipe(
+								Effect.flatMap(() =>
+									Queue.offer(queue, {
+										chunkPath: spec.chunkPath,
+										sourceFile: absPath,
+										startTime: spec.startTime,
+										endTime: spec.endTime,
+									})
+								)
+							),
+						{ discard: true }
+					);
+
+					return { total: specs.length, produce };
 				}),
 
 			downscaleChunk: (chunkPath, options = {}) =>

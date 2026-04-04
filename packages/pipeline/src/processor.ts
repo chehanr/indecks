@@ -9,7 +9,7 @@ import { library as libraryTable } from "@indecks/db/schema/library";
 import { video as videoTable } from "@indecks/db/schema/video";
 import type { VectorDb, VectorDbManagerShape } from "@indecks/vector";
 import { and, eq, inArray } from "drizzle-orm";
-import { Context, Duration, Effect, Layer } from "effect";
+import { Context, Duration, Effect, Layer, Queue } from "effect";
 import { nanoid } from "nanoid";
 
 import type { EmbedConfig } from "./embedder";
@@ -20,6 +20,7 @@ import {
 	LibraryNotFoundError,
 	VideoNotFoundError,
 } from "./errors";
+import type { ChunkInfo } from "./ffmpeg";
 import { FFmpegService } from "./ffmpeg";
 
 type ProgressFn = (progress: number, message: string) => Effect.Effect<void>;
@@ -349,59 +350,84 @@ export const ProcessorServiceLive = Layer.effect(
 					overlap: ctx.chunkOverlap,
 					downscaleFps: ctx.downscaleFps,
 					downscaleHeight: 480,
+					concurrency: ctx.concurrency,
 				};
 
-				const chunks = yield* ffmpeg
-					.chunkVideo(vid.filePath, chunkOpts)
+				yield* progress(
+					onProgress,
+					0,
+					`${vid.fileName} — Splitting into chunks...`
+				);
+
+				// Producer-consumer: producer creates chunks sequentially,
+				// consumers process them as soon as they appear.
+				const queue = yield* Queue.bounded<ChunkInfo>(ctx.concurrency);
+
+				const { total: totalChunks, produce } = yield* ffmpeg
+					.chunkVideoStreamed(vid.filePath, chunkOpts, queue)
 					.pipe(
 						Effect.catchAll((err) =>
 							Effect.logError(
-								`Chunking failed for ${vid.fileName}: ${err}`
-							).pipe(Effect.as([]))
+								`Chunking setup failed for ${vid.fileName}: ${err}`
+							).pipe(
+								Effect.flatMap(() => Queue.shutdown(queue)),
+								Effect.as({ total: 0, produce: Effect.void })
+							)
 						)
 					);
 
-				const totalChunks = chunks.length;
 				yield* Effect.logInfo(
 					`${vid.fileName}: ${totalChunks} chunks (concurrency: ${ctx.concurrency})`
 				);
 
-				// Bulk-insert all chunk records upfront
-				if (totalChunks > 0) {
-					yield* Effect.promise(() =>
-						db
-							.insert(chunkTable)
-							.values(
-								chunks.map((c) => ({
-									id: makeChunkId(vid.id, ctx.indexerId, c.startTime),
-									videoId: vid.id,
-									indexerId: ctx.indexerId,
-									startTime: c.startTime,
-									endTime: c.endTime,
-									isStillFrame: false,
-									embeddingStatus: "pending" as const,
-								}))
-							)
-							.onConflictDoNothing()
-					);
-				}
-
 				let processed = 0;
+				const allChunks: ChunkInfo[] = [];
 				const pendingUpserts: Array<{
 					chunkId: string;
 					embedding: Float32Array;
 				}> = [];
 
+				// Producer: create chunks one at a time, push to queue
+				const producer = produce.pipe(
+					Effect.tap(() => Queue.shutdown(queue)),
+					Effect.catchAll((err) =>
+						Effect.logError(`Chunking failed for ${vid.fileName}: ${err}`).pipe(
+							Effect.flatMap(() => Queue.shutdown(queue))
+						)
+					)
+				);
+
+				const insertChunkRecord = (chunkInfo: ChunkInfo) =>
+					Effect.promise(() =>
+						db
+							.insert(chunkTable)
+							.values({
+								id: makeChunkId(vid.id, ctx.indexerId, chunkInfo.startTime),
+								videoId: vid.id,
+								indexerId: ctx.indexerId,
+								startTime: chunkInfo.startTime,
+								endTime: chunkInfo.endTime,
+								isStillFrame: false,
+								embeddingStatus: "pending" as const,
+							})
+							.onConflictDoNothing()
+					);
+
 				const processChunk = (
-					chunkInfo: (typeof chunks)[number]
+					chunkInfo: ChunkInfo
 				): Effect.Effect<void, JobCancelledError | Error> =>
 					Effect.gen(function* () {
 						yield* checkCancelled(db, ctx.jobId);
+						allChunks.push(chunkInfo);
+
 						const chunkId = makeChunkId(
 							vid.id,
 							ctx.indexerId,
 							chunkInfo.startTime
 						);
+
+						yield* insertChunkRecord(chunkInfo);
+
 						const chunkDuration = chunkInfo.endTime - chunkInfo.startTime;
 						const still = yield* ffmpeg.isStillFrame(
 							chunkInfo.chunkPath,
@@ -436,7 +462,7 @@ export const ProcessorServiceLive = Layer.effect(
 					});
 
 				const markChunkError = (
-					chunkInfo: (typeof chunks)[number],
+					chunkInfo: ChunkInfo,
 					err: unknown
 				): Effect.Effect<void> => {
 					const chunkId = makeChunkId(
@@ -459,29 +485,47 @@ export const ProcessorServiceLive = Layer.effect(
 					);
 				};
 
-				yield* Effect.forEach(
-					chunks,
-					(chunkInfo) =>
-						processChunk(chunkInfo).pipe(
+				// Consumer: pull from queue, process concurrently
+				const consumer = Effect.gen(function* () {
+					while (true) {
+						const chunkInfo = yield* Queue.take(queue).pipe(
+							Effect.catchAll(() => Effect.fail("done" as const))
+						);
+						yield* processChunk(chunkInfo).pipe(
 							Effect.timeout(Duration.minutes(5)),
-							Effect.catchIf(
-								(e): e is JobCancelledError => e instanceof JobCancelledError,
-								(e) => Effect.fail(e)
-							),
-							Effect.catchAll((err) => markChunkError(chunkInfo, err)),
+							Effect.catchAll((err) => {
+								if (err instanceof JobCancelledError) {
+									return Queue.shutdown(queue).pipe(
+										Effect.flatMap(() => Effect.fail(err))
+									);
+								}
+								return markChunkError(chunkInfo, err);
+							}),
 							Effect.catchAllDefect((err) => markChunkError(chunkInfo, err)),
 							Effect.tap(() => {
 								processed++;
-								const pct = Math.round((processed / totalChunks) * 100);
+								const pct =
+									totalChunks > 0
+										? Math.round((processed / totalChunks) * 100)
+										: 0;
 								return progress(
 									onProgress,
 									pct,
-									`${vid.fileName} — Chunk ${processed}/${totalChunks}`
+									`${vid.fileName} — Chunk ${processed}/${totalChunks || "?"}`
 								);
 							})
-						),
-					{ concurrency: ctx.concurrency }
+						);
+					}
+				}).pipe(Effect.catchAll(() => Effect.void));
+
+				// Run producer + N consumers concurrently
+				const consumers = Array.from(
+					{ length: ctx.concurrency },
+					() => consumer
 				);
+				yield* Effect.all([producer, ...consumers], {
+					concurrency: "unbounded",
+				});
 
 				// Batch upsert all embeddings to vector DB
 				if (pendingUpserts.length > 0) {
@@ -501,7 +545,7 @@ export const ProcessorServiceLive = Layer.effect(
 					);
 				}
 
-				yield* ffmpeg.cleanupChunks(chunks);
+				yield* ffmpeg.cleanupChunks(allChunks);
 			});
 
 		const processVideo = (
