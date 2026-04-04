@@ -892,7 +892,7 @@ function IndexerCard({
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end">
 						<DropdownMenuItem onClick={() => indexMutation.mutate(false)}>
-							Index new
+							Index unindexed
 						</DropdownMenuItem>
 						<DropdownMenuItem onClick={() => indexMutation.mutate(true)}>
 							Force re-index all

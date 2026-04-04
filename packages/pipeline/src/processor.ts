@@ -775,7 +775,9 @@ export const ProcessorServiceLive = Layer.effect(
 						.all()
 				);
 
-				const videosToProcess = videos.filter((v) => v.status === "pending");
+				const videosToProcess = videos.filter(
+					(v) => v.status === "pending" || v.status === "error"
+				);
 
 				if (videosToProcess.length === 0) {
 					yield* progress(onProgress, 100, "No pending videos to index.");
