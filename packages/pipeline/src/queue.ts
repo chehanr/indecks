@@ -499,6 +499,7 @@ export const JobQueueServiceLive = Layer.effect(
 							yield* Effect.logInfo(
 								`Claimed job ${jobRow.id} (${jobRow.type})`
 							);
+							yield* updateJobProgress(jobRow.id, 0, "Preparing...");
 							yield* runJob(jobRow);
 							yield* Effect.logInfo(`Finished job ${jobRow.id}`);
 						}

@@ -180,13 +180,8 @@ export const ProcessorServiceLive = Layer.effect(
 				let processed = 0;
 				let added = 0;
 				let changed = 0;
-				let lastReport = 0;
 
-				const maybeReport = (): Effect.Effect<void> => {
-					if (processed - lastReport < 10 && processed !== total) {
-						return Effect.void;
-					}
-					lastReport = processed;
+				const report = (): Effect.Effect<void> => {
 					const names = [...activeFiles].map((f) => basename(f)).join(", ");
 					const pct = Math.round((processed / total) * 100);
 					return progress(onProgress, pct, `${names} (${processed}/${total})`);
@@ -197,6 +192,7 @@ export const ProcessorServiceLive = Layer.effect(
 					(filePath) =>
 						Effect.gen(function* () {
 							activeFiles.add(filePath);
+							yield* report();
 
 							const existing = existingByPath.get(filePath);
 							if (existing) {
@@ -218,7 +214,7 @@ export const ProcessorServiceLive = Layer.effect(
 
 							processed++;
 							activeFiles.delete(filePath);
-							yield* maybeReport();
+							yield* report();
 						}),
 					{ concurrency: 3 }
 				);
