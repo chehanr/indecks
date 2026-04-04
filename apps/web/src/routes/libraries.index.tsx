@@ -109,6 +109,7 @@ function CreateLibraryDialog() {
 							<FieldLabel>Folder Paths</FieldLabel>
 							<div className="space-y-2">
 								{folderPaths.map((path, i) => (
+									// biome-ignore lint/suspicious/noArrayIndexKey: editable input list
 									<div className="flex gap-2" key={i}>
 										<Input
 											onChange={(e) => {
