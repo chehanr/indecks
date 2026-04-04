@@ -95,11 +95,20 @@ export const ProcessorServiceLive = Layer.effect(
 
 		const detectChangedVideos = (
 			db: Db,
-			videos: ExistingVideo[]
+			videos: ExistingVideo[],
+			onProgress?: ProgressFn
 		): Effect.Effect<number> =>
 			Effect.gen(function* () {
 				let changed = 0;
-				for (const vid of videos) {
+				const total = videos.length;
+				for (const [i, vid] of videos.entries()) {
+					if (i % 100 === 0) {
+						yield* progress(
+							onProgress,
+							Math.round((i / total) * 100),
+							`Checking file ${i + 1}/${total}...`
+						);
+					}
 					const fileStat = yield* fs.stat(vid.filePath).pipe(Effect.option);
 					if (fileStat._tag === "None") {
 						continue;
@@ -157,10 +166,12 @@ export const ProcessorServiceLive = Layer.effect(
 					);
 
 					added++;
-					const pct = Math.round(
-						10 + (newPaths.indexOf(filePath) / newPaths.length) * 90
+					const pct = Math.round((added / newPaths.length) * 100);
+					yield* progress(
+						onProgress,
+						pct,
+						`Adding video ${added}/${newPaths.length}...`
 					);
-					yield* progress(onProgress, pct, `Found ${added} new videos...`);
 				}
 				return added;
 			});
@@ -185,7 +196,7 @@ export const ProcessorServiceLive = Layer.effect(
 					return yield* new LibraryNotFoundError({ libraryId });
 				}
 
-				yield* progress(onProgress, 0, "Scanning folders for videos...");
+				yield* progress(onProgress, 0, "Listing folders for videos...");
 
 				const folderPaths: string[] = JSON.parse(lib.folderPaths);
 				const allVideoPaths: string[] = [];
@@ -200,8 +211,10 @@ export const ProcessorServiceLive = Layer.effect(
 				const videoPaths = [...new Set(allVideoPaths)];
 				const diskPaths = new Set(videoPaths);
 
-				yield* Effect.logInfo(
-					`Total unique videos on disk: ${videoPaths.length}`
+				yield* progress(
+					onProgress,
+					20,
+					`Found ${videoPaths.length} videos on disk.`
 				);
 
 				const existingVideos = yield* Effect.promise(() =>
@@ -216,10 +229,6 @@ export const ProcessorServiceLive = Layer.effect(
 						.all()
 				);
 
-				yield* Effect.logInfo(
-					`Existing videos in DB: ${existingVideos.length}`
-				);
-
 				// Remove videos whose files no longer exist on disk
 				const staleIds = existingVideos
 					.filter((v) => !diskPaths.has(v.filePath))
@@ -228,11 +237,6 @@ export const ProcessorServiceLive = Layer.effect(
 				if (staleIds.length > 0) {
 					yield* Effect.promise(() =>
 						db.delete(videoTable).where(inArray(videoTable.id, staleIds))
-					);
-					yield* progress(
-						onProgress,
-						5,
-						`Removed ${staleIds.length} missing videos.`
 					);
 				}
 
@@ -243,12 +247,19 @@ export const ProcessorServiceLive = Layer.effect(
 				yield* Effect.logInfo(
 					`Checking ${currentVideos.length} videos for changes`
 				);
-				const changed = yield* detectChangedVideos(db, currentVideos);
+
+				const changeProgress: ProgressFn = (pct, msg) =>
+					progress(onProgress, 20 + Math.round(pct * 0.4), msg);
+				const changed = yield* detectChangedVideos(
+					db,
+					currentVideos,
+					changeProgress
+				);
 
 				if (changed > 0) {
 					yield* progress(
 						onProgress,
-						10,
+						60,
 						`${changed} videos changed, will re-index.`
 					);
 				}
@@ -257,7 +268,10 @@ export const ProcessorServiceLive = Layer.effect(
 				const existingPaths = new Set(existingVideos.map((v) => v.filePath));
 				const newPaths = videoPaths.filter((p) => !existingPaths.has(p));
 				yield* Effect.logInfo(`New videos to add: ${newPaths.length}`);
-				const added = yield* addNewVideos(db, libraryId, newPaths, onProgress);
+
+				const addProgress: ProgressFn = (pct, msg) =>
+					progress(onProgress, 60 + Math.round(pct * 0.4), msg);
+				const added = yield* addNewVideos(db, libraryId, newPaths, addProgress);
 
 				yield* Effect.promise(() =>
 					db

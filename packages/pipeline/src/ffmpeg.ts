@@ -305,8 +305,10 @@ export const FFmpegServiceLive = Layer.effect(
 							.exists(framePath)
 							.pipe(Effect.orElseSucceed(() => false));
 						if (exists) {
-							const info = yield* fs.stat(framePath).pipe(Effect.orDie);
-							sizes.push(Number(info.size));
+							const info = yield* fs.stat(framePath).pipe(Effect.option);
+							if (info._tag === "Some") {
+								sizes.push(Number(info.value.size));
+							}
 						}
 						yield* fs.remove(framePath).pipe(Effect.ignore);
 					}

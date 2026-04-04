@@ -124,7 +124,7 @@ function IndexingProgress({
 		});
 	};
 
-	let statusLabel = "Indexing...";
+	let statusLabel = state.progressMessage ?? "Starting...";
 	if (state.status === "completed") {
 		statusLabel = "Indexing complete";
 	} else if (state.status === "failed") {
@@ -154,11 +154,6 @@ function IndexingProgress({
 						</Button>
 					)}
 				</div>
-				{state.progressMessage && (
-					<p className="mt-2 text-muted-foreground text-xs">
-						{state.progressMessage}
-					</p>
-				)}
 				{state.errorMessage && (
 					<p className="mt-2 text-destructive text-xs">{state.errorMessage}</p>
 				)}
