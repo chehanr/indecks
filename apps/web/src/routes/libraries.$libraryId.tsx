@@ -138,9 +138,9 @@ function IndexingProgress({
 			<CardContent className="py-4">
 				<div className="flex items-center gap-2">
 					<div className="flex-1">
-						<Progress value={state.progress}>
+						<Progress value={state.progress === -1 ? null : state.progress}>
 							<ProgressLabel>{statusLabel}</ProgressLabel>
-							<ProgressValue />
+							{state.progress !== -1 && <ProgressValue />}
 						</Progress>
 					</div>
 					{isActive && (
