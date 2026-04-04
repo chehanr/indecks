@@ -37,7 +37,7 @@ if (env.NODE_ENV === "production") {
 		Effect.gen(function* () {
 			const db = yield* DbService;
 			yield* Effect.promise(() => migrate(db, { migrationsFolder }));
-			console.info("Database migrations applied");
+			yield* Effect.logInfo("Database migrations applied");
 		})
 	);
 }
@@ -62,7 +62,7 @@ await appRuntime.runPromise(
 						renameSync(`${oldPath}${suffix}`, `${newPath}${suffix}`);
 					}
 				}
-				console.info(
+				yield* Effect.logInfo(
 					`Migrated vector DB: ${emb.libraryId} → ${emb.libraryId}-${emb.id}`
 				);
 			}
@@ -89,25 +89,40 @@ await appRuntime.runPromise(
 
 		const recovered = yield* jobQueue.recoverStaleJobs(db);
 		if (recovered > 0) {
-			console.info(`Recovered ${recovered} stale jobs`);
+			yield* Effect.logInfo(`Recovered ${recovered} stale jobs`);
 		}
 	})
 );
 
 const workerFiber = appRuntime.runFork(
 	Effect.gen(function* () {
+		yield* Effect.logInfo("Worker fiber started");
 		const jobQueue = yield* JobQueueService;
 		const db = yield* DbService;
 		const vectorDbManager = yield* VectorDbManagerService;
 		yield* jobQueue.startWorker(db, vectorDbManager);
-	})
+		yield* Effect.logWarning("Worker fiber exited unexpectedly");
+	}).pipe(
+		Effect.catchAllCause((cause) =>
+			Effect.logError("Worker fiber died").pipe(
+				Effect.annotateLogs("cause", cause.toString())
+			)
+		),
+		Effect.annotateLogs("component", "worker")
+	)
 );
 
 const auth = await appRuntime.runPromise(AuthService);
 
 const app = new Hono();
 
-app.use(logger());
+app.use(
+	logger((msg) => {
+		appRuntime.runSync(
+			Effect.logInfo(msg).pipe(Effect.annotateLogs("component", "http"))
+		);
+	})
+);
 app.use(
 	"/*",
 	cors({
@@ -203,7 +218,6 @@ if (env.NODE_ENV === "production") {
 }
 
 const shutdown = async () => {
-	console.info("Shutting down...");
 	await appRuntime
 		.runPromise(Fiber.interrupt(workerFiber))
 		.catch(() => undefined);

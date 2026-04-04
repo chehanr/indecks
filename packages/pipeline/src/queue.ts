@@ -399,6 +399,10 @@ export const JobQueueServiceLive = Layer.effect(
 					) =>
 						Effect.gen(function* () {
 							const msg = formatErrorMessage(err);
+							yield* Effect.logError(`Job ${jobRow.id} failed: ${msg}`).pipe(
+								Effect.annotateLogs("jobType", jobRow.type),
+								Effect.annotateLogs("retryCount", jobRow.retryCount)
+							);
 
 							if (jobRow.retryCount < MAX_RETRIES) {
 								yield* Effect.promise(() =>
@@ -439,6 +443,9 @@ export const JobQueueServiceLive = Layer.effect(
 
 					const handleCancellation = (jobRow: typeof jobTable.$inferSelect) =>
 						Effect.gen(function* () {
+							yield* Effect.logWarning(`Job ${jobRow.id} cancelled`).pipe(
+								Effect.annotateLogs("jobType", jobRow.type)
+							);
 							yield* failJob(db, jobRow.id, "Job cancelled");
 							if (jobRow.videoId) {
 								yield* Effect.promise(() =>
@@ -484,13 +491,26 @@ export const JobQueueServiceLive = Layer.effect(
 					const pollOnce = Effect.gen(function* () {
 						const jobRow = yield* claimNextJob(db);
 						if (jobRow) {
+							yield* Effect.logInfo(
+								`Claimed job ${jobRow.id} (${jobRow.type})`
+							);
 							yield* runJob(jobRow);
+							yield* Effect.logInfo(`Finished job ${jobRow.id}`);
 						}
 					});
 
+					yield* Effect.logInfo("Worker poll loop starting");
 					yield* pollOnce.pipe(
-						Effect.catchAll(() => Effect.void),
-						Effect.catchAllDefect(() => Effect.void),
+						Effect.catchAll((err) =>
+							Effect.logError("Worker poll error").pipe(
+								Effect.annotateLogs("error", String(err))
+							)
+						),
+						Effect.catchAllDefect((err) =>
+							Effect.logError("Worker poll defect").pipe(
+								Effect.annotateLogs("defect", String(err))
+							)
+						),
 						Effect.repeat(Schedule.spaced("3 seconds")),
 						Effect.asVoid
 					);
