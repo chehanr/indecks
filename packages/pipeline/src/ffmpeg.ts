@@ -1,3 +1,4 @@
+import { readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -7,15 +8,17 @@ import { Context, Effect, Layer } from "effect";
 import { FFmpegError } from "./errors";
 
 const MP4_EXT = /\.mp4$/;
-const VIDEO_GLOB = new Bun.Glob("**/*.{mp4,mov,avi,mkv,webm}");
+const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm"]);
 
 const findVideos = (dir: string): Effect.Effect<string[]> =>
 	Effect.promise(async () => {
-		const paths: string[] = [];
-		for await (const entry of VIDEO_GLOB.scan({ cwd: dir })) {
-			paths.push(join(dir, entry));
-		}
-		return paths;
+		const entries = await readdir(dir, { recursive: true });
+		return entries
+			.filter((entry) => {
+				const ext = entry.slice(entry.lastIndexOf(".")).toLowerCase();
+				return VIDEO_EXTENSIONS.has(ext);
+			})
+			.map((entry) => join(dir, entry));
 	});
 
 export interface ChunkInfo {
