@@ -162,6 +162,15 @@ export const JobQueueServiceLive = Layer.effect(
 		return {
 			recoverStaleJobs: (db) =>
 				Effect.gen(function* () {
+					// Finalize cancelled jobs that were interrupted mid-cleanup
+					yield* Effect.promise(() =>
+						db
+							.update(jobTable)
+							.set({ completedAt: new Date() })
+							.where(eq(jobTable.status, "cancelled"))
+					);
+
+					// Re-queue interrupted running jobs
 					const result = yield* Effect.promise(() =>
 						db
 							.update(jobTable)
@@ -204,7 +213,7 @@ export const JobQueueServiceLive = Layer.effect(
 					];
 
 					if (orphanLibraryIds.length > 0) {
-						const activeJobs = yield* Effect.promise(() =>
+						const skipJobs = yield* Effect.promise(() =>
 							db
 								.select({
 									libraryId: jobTable.libraryId,
@@ -215,16 +224,17 @@ export const JobQueueServiceLive = Layer.effect(
 										inArray(jobTable.libraryId, orphanLibraryIds),
 										or(
 											eq(jobTable.status, "pending"),
-											eq(jobTable.status, "running")
+											eq(jobTable.status, "running"),
+											eq(jobTable.status, "cancelled")
 										)
 									)
 								)
 								.all()
 						);
-						const activeLibIds = new Set(activeJobs.map((j) => j.libraryId));
+						const skipLibIds = new Set(skipJobs.map((j) => j.libraryId));
 
 						for (const libId of orphanLibraryIds) {
-							if (activeLibIds.has(libId)) {
+							if (skipLibIds.has(libId)) {
 								continue;
 							}
 
