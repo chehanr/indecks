@@ -86,8 +86,11 @@ const makeVectorDb = (
 				upsert: (chunkId, embedding) =>
 					Effect.try({
 						try: () => {
+							db.prepare("DELETE FROM vec_chunks WHERE chunk_id = ?").run(
+								chunkId
+							);
 							db.prepare(
-								"INSERT OR REPLACE INTO vec_chunks(chunk_id, embedding) VALUES (?, vec_f32(?))"
+								"INSERT INTO vec_chunks(chunk_id, embedding) VALUES (?, vec_f32(?))"
 							).run(chunkId, embedding);
 						},
 						catch: (e) =>
@@ -100,12 +103,16 @@ const makeVectorDb = (
 				upsertBatch: (items) =>
 					Effect.try({
 						try: () => {
-							const stmt = db.prepare(
-								"INSERT OR REPLACE INTO vec_chunks(chunk_id, embedding) VALUES (?, vec_f32(?))"
+							const delStmt = db.prepare(
+								"DELETE FROM vec_chunks WHERE chunk_id = ?"
+							);
+							const insStmt = db.prepare(
+								"INSERT INTO vec_chunks(chunk_id, embedding) VALUES (?, vec_f32(?))"
 							);
 							const tx = db.transaction(() => {
 								for (const item of items) {
-									stmt.run(item.chunkId, item.embedding);
+									delStmt.run(item.chunkId);
+									insStmt.run(item.chunkId, item.embedding);
 								}
 							});
 							tx();
