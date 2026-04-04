@@ -9,7 +9,7 @@ import { library as libraryTable } from "@indecks/db/schema/library";
 import { video as videoTable } from "@indecks/db/schema/video";
 import type { VectorDb, VectorDbManagerShape } from "@indecks/vector";
 import { and, eq, inArray } from "drizzle-orm";
-import { Context, Duration, Effect, Layer, Ref } from "effect";
+import { Context, Duration, Effect, Layer } from "effect";
 import { nanoid } from "nanoid";
 
 import type { EmbedConfig } from "./embedder";
@@ -176,13 +176,18 @@ export const ProcessorServiceLive = Layer.effect(
 		): Effect.Effect<{ added: number; changed: number; removed: number }> =>
 			Effect.gen(function* () {
 				const total = videoPaths.length;
-				const active = yield* Ref.make(new Set<string>());
+				const activeFiles = new Set<string>();
 				let processed = 0;
 				let added = 0;
 				let changed = 0;
+				let lastReport = 0;
 
-				const reportActive = (activeSet: Set<string>): Effect.Effect<void> => {
-					const names = [...activeSet].map((f) => basename(f)).join(", ");
+				const maybeReport = (): Effect.Effect<void> => {
+					if (processed - lastReport < 10 && processed !== total) {
+						return Effect.void;
+					}
+					lastReport = processed;
+					const names = [...activeFiles].map((f) => basename(f)).join(", ");
 					const pct = Math.round((processed / total) * 100);
 					return progress(onProgress, pct, `${names} (${processed}/${total})`);
 				};
@@ -191,8 +196,7 @@ export const ProcessorServiceLive = Layer.effect(
 					videoPaths,
 					(filePath) =>
 						Effect.gen(function* () {
-							yield* Ref.update(active, (s) => new Set([...s, filePath]));
-							yield* Ref.get(active).pipe(Effect.flatMap(reportActive));
+							activeFiles.add(filePath);
 
 							const existing = existingByPath.get(filePath);
 							if (existing) {
@@ -213,12 +217,8 @@ export const ProcessorServiceLive = Layer.effect(
 							}
 
 							processed++;
-							yield* Ref.update(active, (s) => {
-								const next = new Set(s);
-								next.delete(filePath);
-								return next;
-							});
-							yield* Ref.get(active).pipe(Effect.flatMap(reportActive));
+							activeFiles.delete(filePath);
+							yield* maybeReport();
 						}),
 					{ concurrency: 3 }
 				);

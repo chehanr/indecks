@@ -65,24 +65,13 @@ const claimNextJob = (db: Db) =>
 	}).pipe(Effect.catchAll(() => Effect.succeed(null)));
 
 const updateJobProgress = (
-	db: Db,
 	jobId: string,
 	progressVal: number,
 	message: string
 ) =>
-	Effect.promise(() =>
-		db
-			.update(jobTable)
-			.set({ progress: progressVal, progressMessage: message })
-			.where(eq(jobTable.id, jobId))
-	).pipe(
-		Effect.tap(() =>
-			Effect.sync(() =>
-				onJobProgress?.(jobId, "running", progressVal, message, null)
-			)
-		),
-		Effect.ignore
-	);
+	Effect.sync(() =>
+		onJobProgress?.(jobId, "running", progressVal, message, null)
+	).pipe(Effect.ignore);
 
 const completeJob = (db: Db, jobId: string, jobType?: string) =>
 	Effect.promise(() =>
@@ -264,7 +253,7 @@ export const JobQueueServiceLive = Layer.effect(
 					const onProgress =
 						(jobId: string): ProgressFn =>
 						(progressVal, message) =>
-							updateJobProgress(db, jobId, progressVal, message);
+							updateJobProgress(jobId, progressVal, message);
 
 					const handleScanLibrary = (jobRow: typeof jobTable.$inferSelect) =>
 						Effect.gen(function* () {
