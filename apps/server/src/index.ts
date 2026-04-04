@@ -138,9 +138,10 @@ app.get("/api/video", async (c) => {
 		})
 	);
 
-	const isAllowed = libraries.some((lib) =>
-		absPath.startsWith(resolve(lib.folderPath))
-	);
+	const isAllowed = libraries.some((lib) => {
+		const folderPaths: string[] = JSON.parse(lib.folderPaths);
+		return folderPaths.some((fp) => absPath.startsWith(resolve(fp)));
+	});
 	if (!isAllowed) {
 		return c.text("Access denied", 403);
 	}

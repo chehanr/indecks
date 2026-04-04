@@ -203,9 +203,15 @@ export const ProcessorServiceLive = Layer.effect(
 					return yield* new LibraryNotFoundError({ libraryId });
 				}
 
-				yield* progress(onProgress, 0, "Scanning folder for videos...");
+				yield* progress(onProgress, 0, "Scanning folders for videos...");
 
-				const videoPaths = yield* ffmpeg.scanDirectory(lib.folderPath);
+				const folderPaths: string[] = JSON.parse(lib.folderPaths);
+				const allVideoPaths: string[] = [];
+				for (const folderPath of folderPaths) {
+					const paths = yield* ffmpeg.scanDirectory(folderPath);
+					allVideoPaths.push(...paths);
+				}
+				const videoPaths = [...new Set(allVideoPaths)];
 				const diskPaths = new Set(videoPaths);
 
 				const existingVideos = yield* Effect.promise(() =>

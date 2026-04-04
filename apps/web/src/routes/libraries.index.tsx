@@ -19,7 +19,7 @@ import { Field, FieldGroup, FieldLabel } from "@indecks/ui/components/field";
 import { Input } from "@indecks/ui/components/input";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
-import { Plus } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -50,15 +50,15 @@ const statusVariant: Record<
 function CreateLibraryDialog() {
 	const [open, setOpen] = useState(false);
 	const [name, setName] = useState("");
-	const [folderPath, setFolderPath] = useState("");
+	const [folderPaths, setFolderPaths] = useState([""]);
 
 	const createMutation = useMutation({
-		mutationFn: (input: { name: string; folderPath: string }) =>
+		mutationFn: (input: { name: string; folderPaths: string[] }) =>
 			trpcClient.library.create.mutate(input),
 		onSuccess: () => {
 			toast.success("Library created");
 			setName("");
-			setFolderPath("");
+			setFolderPaths([""]);
 			setOpen(false);
 			queryClient.invalidateQueries({ queryKey: [["library", "list"]] });
 		},
@@ -66,6 +66,9 @@ function CreateLibraryDialog() {
 			toast.error(err.message);
 		},
 	});
+
+	const validPaths = folderPaths.filter((p) => p.trim());
+	const canSubmit = name.trim() && validPaths.length > 0;
 
 	return (
 		<Dialog onOpenChange={setOpen} open={open}>
@@ -81,14 +84,14 @@ function CreateLibraryDialog() {
 				<DialogHeader>
 					<DialogTitle>Create Library</DialogTitle>
 					<DialogDescription>
-						Point to a local folder containing video files.
+						Point to one or more folders containing video files.
 					</DialogDescription>
 				</DialogHeader>
 				<form
 					onSubmit={(e) => {
 						e.preventDefault();
-						if (name.trim() && folderPath.trim()) {
-							createMutation.mutate({ name, folderPath });
+						if (canSubmit) {
+							createMutation.mutate({ name, folderPaths: validPaths });
 						}
 					}}
 				>
@@ -103,18 +106,46 @@ function CreateLibraryDialog() {
 							/>
 						</Field>
 						<Field>
-							<FieldLabel htmlFor="lib-folder">Folder Path</FieldLabel>
-							<Input
-								id="lib-folder"
-								onChange={(e) => setFolderPath(e.target.value)}
-								placeholder="/path/to/videos"
-								value={folderPath}
-							/>
+							<FieldLabel>Folder Paths</FieldLabel>
+							<div className="space-y-2">
+								{folderPaths.map((path, i) => (
+									<div className="flex gap-2" key={i}>
+										<Input
+											onChange={(e) => {
+												const next = [...folderPaths];
+												next[i] = e.target.value;
+												setFolderPaths(next);
+											}}
+											placeholder="/path/to/videos"
+											value={path}
+										/>
+										{folderPaths.length > 1 && (
+											<Button
+												onClick={() =>
+													setFolderPaths(folderPaths.filter((_, j) => j !== i))
+												}
+												size="icon"
+												type="button"
+												variant="ghost"
+											>
+												<Trash2 className="size-4" />
+											</Button>
+										)}
+									</div>
+								))}
+								<Button
+									onClick={() => setFolderPaths([...folderPaths, ""])}
+									size="sm"
+									type="button"
+									variant="outline"
+								>
+									<Plus className="size-4" />
+									Add Path
+								</Button>
+							</div>
 						</Field>
 						<Button
-							disabled={
-								!(name.trim() && folderPath.trim()) || createMutation.isPending
-							}
+							disabled={!canSubmit || createMutation.isPending}
 							type="submit"
 						>
 							{createMutation.isPending ? "Creating..." : "Create"}
@@ -132,11 +163,13 @@ function LibraryCard({
 	library: {
 		id: string;
 		name: string;
-		folderPath: string;
+		folderPaths: string;
 		status: string;
 		videoCount: number;
 	};
 }) {
+	const paths: string[] = JSON.parse(library.folderPaths);
+
 	return (
 		<Link params={{ libraryId: library.id }} to="/libraries/$libraryId">
 			<Card className="transition-colors hover:border-foreground/20">
@@ -148,7 +181,7 @@ function LibraryCard({
 						</Badge>
 					</div>
 					<CardDescription className="truncate">
-						{library.folderPath}
+						{paths.length === 1 ? paths[0] : `${paths.length} folders`}
 					</CardDescription>
 				</CardHeader>
 				<CardContent>

@@ -1106,6 +1106,131 @@ function SearchTab({ libraryId }: { libraryId: string }) {
 	);
 }
 
+// --- Edit Library Dialog ---
+
+function EditLibraryDialog({
+	library,
+}: {
+	library: { id: string; name: string; folderPaths: string };
+}) {
+	const [open, setOpen] = useState(false);
+	const [name, setName] = useState(library.name);
+	const [folderPaths, setFolderPaths] = useState<string[]>(() =>
+		JSON.parse(library.folderPaths)
+	);
+
+	const handleOpen = (next: boolean) => {
+		setOpen(next);
+		if (next) {
+			setName(library.name);
+			setFolderPaths(JSON.parse(library.folderPaths));
+		}
+	};
+
+	const updateMutation = useMutation({
+		mutationFn: () =>
+			trpcClient.library.update.mutate({
+				id: library.id,
+				name,
+				folderPaths: folderPaths.filter((p) => p.trim()),
+			}),
+		onSuccess: () => {
+			toast.success("Library updated");
+			queryClient.invalidateQueries({ queryKey: [["library", "get"]] });
+			queryClient.invalidateQueries({ queryKey: [["library", "list"]] });
+			setOpen(false);
+		},
+		onError: (err) => {
+			toast.error(err.message);
+		},
+	});
+
+	const validPaths = folderPaths.filter((p) => p.trim());
+	const canSubmit = name.trim() !== "" && validPaths.length > 0;
+
+	return (
+		<Dialog onOpenChange={handleOpen} open={open}>
+			<DialogTrigger
+				render={
+					<Button size="sm" variant="outline">
+						<Pencil className="size-4" />
+						Edit
+					</Button>
+				}
+			/>
+			<DialogContent>
+				<DialogHeader>
+					<DialogTitle>Edit Library</DialogTitle>
+				</DialogHeader>
+				<form
+					onSubmit={(e) => {
+						e.preventDefault();
+						if (canSubmit) {
+							updateMutation.mutate();
+						}
+					}}
+				>
+					<FieldGroup>
+						<Field>
+							<FieldLabel htmlFor="edit-lib-name">Name</FieldLabel>
+							<Input
+								id="edit-lib-name"
+								onChange={(e) => setName(e.target.value)}
+								value={name}
+							/>
+						</Field>
+						<Field>
+							<FieldLabel>Folder Paths</FieldLabel>
+							<div className="space-y-2">
+								{folderPaths.map((path, i) => (
+									<div className="flex gap-2" key={i}>
+										<Input
+											onChange={(e) => {
+												const next = [...folderPaths];
+												next[i] = e.target.value;
+												setFolderPaths(next);
+											}}
+											placeholder="/path/to/videos"
+											value={path}
+										/>
+										{folderPaths.length > 1 && (
+											<Button
+												onClick={() =>
+													setFolderPaths(folderPaths.filter((_, j) => j !== i))
+												}
+												size="icon"
+												type="button"
+												variant="ghost"
+											>
+												<Trash2 className="size-4" />
+											</Button>
+										)}
+									</div>
+								))}
+								<Button
+									onClick={() => setFolderPaths([...folderPaths, ""])}
+									size="sm"
+									type="button"
+									variant="outline"
+								>
+									<Plus className="size-4" />
+									Add Path
+								</Button>
+							</div>
+						</Field>
+						<Button
+							disabled={!canSubmit || updateMutation.isPending}
+							type="submit"
+						>
+							{updateMutation.isPending ? "Saving..." : "Save"}
+						</Button>
+					</FieldGroup>
+				</form>
+			</DialogContent>
+		</Dialog>
+	);
+}
+
 // --- Main Page ---
 
 function LibraryDetailPage() {
@@ -1178,40 +1303,50 @@ function LibraryDetailPage() {
 			<div className="flex items-center justify-between">
 				<div>
 					<h1 className="font-bold text-2xl">{library.name}</h1>
-					<p className="text-muted-foreground text-sm">{library.folderPath}</p>
+					{(() => {
+						const paths: string[] = JSON.parse(library.folderPaths);
+						return paths.map((p) => (
+							<p className="text-muted-foreground text-sm" key={p}>
+								{p}
+							</p>
+						));
+					})()}
 				</div>
-				<AlertDialog>
-					<AlertDialogTrigger
-						render={
-							<Button
-								disabled={deleteMutation.isPending}
-								size="sm"
-								variant="destructive"
-							>
-								<Trash2 className="size-4" />
-								Delete
-							</Button>
-						}
-					/>
-					<AlertDialogContent>
-						<AlertDialogHeader>
-							<AlertDialogTitle>Delete {library.name}?</AlertDialogTitle>
-							<AlertDialogDescription>
-								This will permanently delete the library, all videos, indexers,
-								and vector data.
-							</AlertDialogDescription>
-						</AlertDialogHeader>
-						<AlertDialogFooter>
-							<AlertDialogCancel>Cancel</AlertDialogCancel>
-							<AlertDialogAction
-								onClick={() => deleteMutation.mutate()}
-								variant="destructive"
-							>
-								Delete
-							</AlertDialogAction>
-						</AlertDialogFooter>
-					</AlertDialogContent>
-				</AlertDialog>
+				<div className="flex items-center gap-2">
+					<EditLibraryDialog library={library} />
+					<AlertDialog>
+						<AlertDialogTrigger
+							render={
+								<Button
+									disabled={deleteMutation.isPending}
+									size="sm"
+									variant="destructive"
+								>
+									<Trash2 className="size-4" />
+									Delete
+								</Button>
+							}
+						/>
+						<AlertDialogContent>
+							<AlertDialogHeader>
+								<AlertDialogTitle>Delete {library.name}?</AlertDialogTitle>
+								<AlertDialogDescription>
+									This will permanently delete the library, all videos,
+									indexers, and vector data.
+								</AlertDialogDescription>
+							</AlertDialogHeader>
+							<AlertDialogFooter>
+								<AlertDialogCancel>Cancel</AlertDialogCancel>
+								<AlertDialogAction
+									onClick={() => deleteMutation.mutate()}
+									variant="destructive"
+								>
+									Delete
+								</AlertDialogAction>
+							</AlertDialogFooter>
+						</AlertDialogContent>
+					</AlertDialog>
+				</div>
 			</div>
 
 			{trackedJobIds.length > 0 && (

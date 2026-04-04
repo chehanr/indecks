@@ -62,7 +62,7 @@ export const libraryRouter = router({
 		.input(
 			z.object({
 				name: z.string().min(1),
-				folderPath: z.string().min(1),
+				folderPaths: z.array(z.string().min(1)).min(1),
 			})
 		)
 		.mutation(({ ctx, input }) =>
@@ -72,22 +72,24 @@ export const libraryRouter = router({
 					const db = yield* DbService;
 
 					const fsService = yield* FileSystem.FileSystem;
-					yield* fsService.access(input.folderPath).pipe(
-						Effect.catchAll(() =>
-							Effect.fail(
-								new FolderNotAccessibleError({
-									path: input.folderPath,
-								})
+					for (const folderPath of input.folderPaths) {
+						yield* fsService.access(folderPath).pipe(
+							Effect.catchAll(() =>
+								Effect.fail(
+									new FolderNotAccessibleError({
+										path: folderPath,
+									})
+								)
 							)
-						)
-					);
+						);
+					}
 
 					const id = nanoid();
 					yield* Effect.promise(() =>
 						db.insert(libraryTable).values({
 							id,
 							name: input.name,
-							folderPath: input.folderPath,
+							folderPaths: JSON.stringify(input.folderPaths),
 						})
 					);
 
@@ -101,7 +103,7 @@ export const libraryRouter = router({
 			z.object({
 				id: z.string(),
 				name: z.string().min(1).optional(),
-				folderPath: z.string().min(1).optional(),
+				folderPaths: z.array(z.string().min(1)).min(1).optional(),
 			})
 		)
 		.mutation(({ ctx, input }) =>
@@ -115,18 +117,20 @@ export const libraryRouter = router({
 					if (fields.name !== undefined) {
 						set.name = fields.name;
 					}
-					if (fields.folderPath !== undefined) {
+					if (fields.folderPaths !== undefined) {
 						const fsService = yield* FileSystem.FileSystem;
-						yield* fsService.access(fields.folderPath as string).pipe(
-							Effect.catchAll(() =>
-								Effect.fail(
-									new FolderNotAccessibleError({
-										path: fields.folderPath as string,
-									})
+						for (const folderPath of fields.folderPaths) {
+							yield* fsService.access(folderPath).pipe(
+								Effect.catchAll(() =>
+									Effect.fail(
+										new FolderNotAccessibleError({
+											path: folderPath,
+										})
+									)
 								)
-							)
-						);
-						set.folderPath = fields.folderPath;
+							);
+						}
+						set.folderPaths = JSON.stringify(fields.folderPaths);
 					}
 
 					yield* Effect.promise(() =>

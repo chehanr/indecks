@@ -9,7 +9,7 @@ export const library = sqliteTable(
 	{
 		id: text("id").primaryKey(),
 		name: text("name").notNull(),
-		folderPath: text("folder_path").notNull(),
+		folderPaths: text("folder_paths").notNull(),
 		status: text("status", {
 			enum: ["idle", "scanning", "indexing", "ready", "error"],
 		})
