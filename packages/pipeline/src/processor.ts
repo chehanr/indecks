@@ -480,16 +480,28 @@ export const ProcessorServiceLive = Layer.effect(
 					.get(vid.libraryId, emb.id, emb.dimensions)
 					.pipe(Effect.orDie);
 
+				const embConfig: EmbedConfig = {
+					apiKey: emb.apiKey ?? "",
+					baseUrl: emb.baseUrl,
+					dimensions: emb.dimensions,
+					model: emb.model,
+				};
+
+				yield* progress(onProgress, 0, "Testing embedding API connection...");
+				const preflight = yield* embedSvc.testConnection(embConfig);
+				if (!preflight.ok) {
+					yield* Effect.die(
+						new Error(
+							`Embedding API preflight failed: ${preflight.error ?? "unknown error"}`
+						)
+					);
+				}
+
 				const indexer: IndexerContext = {
 					indexerId: emb.id,
 					vectorDb,
 					jobId,
-					config: {
-						apiKey: emb.apiKey ?? "",
-						baseUrl: emb.baseUrl,
-						dimensions: emb.dimensions,
-						model: emb.model,
-					},
+					config: embConfig,
 					instruction: emb.instruction ?? undefined,
 					chunkDuration: emb.chunkDuration,
 					chunkOverlap: emb.chunkOverlap,
@@ -506,10 +518,30 @@ export const ProcessorServiceLive = Layer.effect(
 				yield* progress(onProgress, 0, `Processing ${vid.fileName}...`);
 				yield* processVideoForIndexer(db, vid, indexer, onProgress);
 
+				const errorChunks = yield* Effect.promise(() =>
+					db
+						.select({ id: chunkTable.id })
+						.from(chunkTable)
+						.where(
+							and(
+								eq(chunkTable.videoId, videoId),
+								eq(chunkTable.indexerId, indexerId),
+								eq(chunkTable.embeddingStatus, "error")
+							)
+						)
+						.all()
+				);
+
 				yield* Effect.promise(() =>
 					db
 						.update(videoTable)
-						.set({ status: "indexed" })
+						.set({
+							status: errorChunks.length > 0 ? "error" : "indexed",
+							errorMessage:
+								errorChunks.length > 0
+									? `${errorChunks.length} chunk(s) failed to embed`
+									: null,
+						})
 						.where(eq(videoTable.id, videoId))
 				);
 			}).pipe(
@@ -567,6 +599,23 @@ export const ProcessorServiceLive = Layer.effect(
 					});
 				}
 
+				const embConfig: EmbedConfig = {
+					apiKey: emb.apiKey ?? "",
+					baseUrl: emb.baseUrl,
+					dimensions: emb.dimensions,
+					model: emb.model,
+				};
+
+				yield* progress(onProgress, 0, "Testing embedding API connection...");
+				const preflight = yield* embedSvc.testConnection(embConfig);
+				if (!preflight.ok) {
+					yield* Effect.die(
+						new Error(
+							`Embedding API preflight failed: ${preflight.error ?? "unknown error"}`
+						)
+					);
+				}
+
 				const vectorDb = yield* vectorDbManager
 					.get(libraryId, emb.id, emb.dimensions)
 					.pipe(Effect.orDie);
@@ -575,12 +624,7 @@ export const ProcessorServiceLive = Layer.effect(
 					indexerId: emb.id,
 					vectorDb,
 					jobId,
-					config: {
-						apiKey: emb.apiKey ?? "",
-						baseUrl: emb.baseUrl,
-						dimensions: emb.dimensions,
-						model: emb.model,
-					},
+					config: embConfig,
 					instruction: emb.instruction ?? undefined,
 					chunkDuration: emb.chunkDuration,
 					chunkOverlap: emb.chunkOverlap,
@@ -650,10 +694,30 @@ export const ProcessorServiceLive = Layer.effect(
 
 					yield* processVideoForIndexer(db, vid, indexer, vidProgress);
 
+					const errorChunks = yield* Effect.promise(() =>
+						db
+							.select({ id: chunkTable.id })
+							.from(chunkTable)
+							.where(
+								and(
+									eq(chunkTable.videoId, vid.id),
+									eq(chunkTable.indexerId, indexer.indexerId),
+									eq(chunkTable.embeddingStatus, "error")
+								)
+							)
+							.all()
+					);
+
 					yield* Effect.promise(() =>
 						db
 							.update(videoTable)
-							.set({ status: "indexed" })
+							.set({
+								status: errorChunks.length > 0 ? "error" : "indexed",
+								errorMessage:
+									errorChunks.length > 0
+										? `${errorChunks.length} chunk(s) failed to embed`
+										: null,
+							})
 							.where(eq(videoTable.id, vid.id))
 					);
 					processed++;
