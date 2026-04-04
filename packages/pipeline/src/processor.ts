@@ -361,17 +361,32 @@ export const ProcessorServiceLive = Layer.effect(
 
 				// Producer-consumer: producer creates chunks sequentially,
 				// consumers process them as soon as they appear.
-				const queue = yield* Queue.bounded<ChunkInfo>(ctx.concurrency);
+				// null = poison pill signalling no more chunks.
+				const queue = yield* Queue.bounded<ChunkInfo | null>(ctx.concurrency);
 
-				const { total: totalChunks, produce } = yield* ffmpeg
+				const {
+					total: totalChunks,
+					produce,
+					tmpDir,
+				} = yield* ffmpeg
 					.chunkVideoStreamed(vid.filePath, chunkOpts, queue)
 					.pipe(
 						Effect.catchAll((err) =>
 							Effect.logError(
 								`Chunking setup failed for ${vid.fileName}: ${err}`
 							).pipe(
-								Effect.flatMap(() => Queue.shutdown(queue)),
-								Effect.as({ total: 0, produce: Effect.void })
+								Effect.flatMap(() =>
+									Effect.forEach(
+										Array.from({ length: ctx.concurrency }),
+										() => Queue.offer(queue, null),
+										{ discard: true }
+									)
+								),
+								Effect.as({
+									total: 0,
+									produce: Effect.void,
+									tmpDir: null as string | null,
+								})
 							)
 						)
 					);
@@ -381,18 +396,24 @@ export const ProcessorServiceLive = Layer.effect(
 				);
 
 				let processed = 0;
-				const allChunks: ChunkInfo[] = [];
 				const pendingUpserts: Array<{
 					chunkId: string;
 					embedding: Float32Array;
 				}> = [];
 
+				// Send one null per consumer so each exits its loop
+				const sendPoisonPills = Effect.forEach(
+					Array.from({ length: ctx.concurrency }),
+					() => Queue.offer(queue, null),
+					{ discard: true }
+				);
+
 				// Producer: create chunks one at a time, push to queue
 				const producer = produce.pipe(
-					Effect.tap(() => Queue.shutdown(queue)),
+					Effect.tap(() => sendPoisonPills),
 					Effect.catchAll((err) =>
 						Effect.logError(`Chunking failed for ${vid.fileName}: ${err}`).pipe(
-							Effect.flatMap(() => Queue.shutdown(queue))
+							Effect.flatMap(() => sendPoisonPills)
 						)
 					)
 				);
@@ -418,7 +439,6 @@ export const ProcessorServiceLive = Layer.effect(
 				): Effect.Effect<void, JobCancelledError | Error> =>
 					Effect.gen(function* () {
 						yield* checkCancelled(db, ctx.jobId);
-						allChunks.push(chunkInfo);
 
 						const chunkId = makeChunkId(
 							vid.id,
@@ -488,9 +508,13 @@ export const ProcessorServiceLive = Layer.effect(
 				// Consumer: pull from queue, process concurrently
 				const consumer = Effect.gen(function* () {
 					while (true) {
-						const chunkInfo = yield* Queue.take(queue).pipe(
+						const item = yield* Queue.take(queue).pipe(
 							Effect.catchAll(() => Effect.fail("done" as const))
 						);
+						if (item === null) {
+							break;
+						}
+						const chunkInfo = item;
 						yield* processChunk(chunkInfo).pipe(
 							Effect.timeout(Duration.minutes(5)),
 							Effect.catchAll((err) => {
@@ -545,7 +569,10 @@ export const ProcessorServiceLive = Layer.effect(
 					);
 				}
 
-				yield* ffmpeg.cleanupChunks(allChunks);
+				// Clean up the entire temp directory (covers leaked files on cancel/error)
+				if (tmpDir) {
+					yield* fs.remove(tmpDir, { recursive: true }).pipe(Effect.ignore);
+				}
 			});
 
 		const processVideo = (

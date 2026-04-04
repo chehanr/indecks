@@ -131,9 +131,13 @@ export interface FFmpegServiceShape {
 	readonly chunkVideoStreamed: (
 		filePath: string,
 		options: ChunkOptions,
-		queue: Queue.Queue<ChunkInfo>
+		queue: Queue.Queue<ChunkInfo | null>
 	) => Effect.Effect<
-		{ produce: Effect.Effect<void, FFmpegError>; total: number },
+		{
+			produce: Effect.Effect<void, FFmpegError>;
+			tmpDir: string;
+			total: number;
+		},
 		FFmpegError
 	>;
 	readonly cleanupChunks: (chunks: ChunkInfo[]) => Effect.Effect<void>;
@@ -370,7 +374,7 @@ export const FFmpegServiceLive = Layer.effect(
 						{ discard: true }
 					);
 
-					return { total: specs.length, produce };
+					return { total: specs.length, produce, tmpDir };
 				}),
 
 			downscaleChunk: (chunkPath, options = {}) =>
