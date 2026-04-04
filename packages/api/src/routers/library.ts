@@ -158,6 +158,43 @@ export const libraryRouter = router({
 			)
 		),
 
+	startScan: protectedProcedure
+		.input(z.object({ id: z.string() }))
+		.mutation(({ ctx, input }) =>
+			runEffect(
+				ctx.runtime,
+				Effect.gen(function* () {
+					const db = yield* DbService;
+
+					const lib = yield* Effect.promise(() =>
+						db
+							.select()
+							.from(libraryTable)
+							.where(eq(libraryTable.id, input.id))
+							.get()
+					);
+
+					if (!lib) {
+						return yield* new LibraryNotFoundError({
+							libraryId: input.id,
+						});
+					}
+
+					const jobId = nanoid();
+					yield* Effect.promise(() =>
+						db.insert(jobTable).values({
+							id: jobId,
+							type: "scan_library",
+							libraryId: input.id,
+							status: "pending",
+						})
+					);
+
+					return { jobId };
+				})
+			)
+		),
+
 	startIndexing: protectedProcedure
 		.input(
 			z.object({

@@ -1,3 +1,5 @@
+import { basename } from "node:path";
+
 import { FileSystem } from "@effect/platform";
 import type { Db } from "@indecks/db";
 import { chunk as chunkTable } from "@indecks/db/schema/chunk";
@@ -102,11 +104,12 @@ export const ProcessorServiceLive = Layer.effect(
 				let changed = 0;
 				const total = videos.length;
 				for (const [i, vid] of videos.entries()) {
-					if (i % 100 === 0) {
+					if (i % 10 === 0 || i === total - 1) {
+						const pct = Math.round((i / total) * 100);
 						yield* progress(
 							onProgress,
-							Math.round((i / total) * 100),
-							`Checking file ${i + 1}/${total}...`
+							pct,
+							`Checking: ${basename(vid.filePath)} (${i + 1}/${total})`
 						);
 					}
 					const fileStat = yield* fs.stat(vid.filePath).pipe(Effect.option);
@@ -170,7 +173,7 @@ export const ProcessorServiceLive = Layer.effect(
 					yield* progress(
 						onProgress,
 						pct,
-						`Adding video ${added}/${newPaths.length}...`
+						`Adding: ${fileName} (${added}/${newPaths.length})`
 					);
 				}
 				return added;
@@ -196,11 +199,19 @@ export const ProcessorServiceLive = Layer.effect(
 					return yield* new LibraryNotFoundError({ libraryId });
 				}
 
-				yield* progress(onProgress, 0, "Listing folders for videos...");
+				yield* Effect.promise(() =>
+					db
+						.update(libraryTable)
+						.set({ status: "scanning" })
+						.where(eq(libraryTable.id, libraryId))
+				);
 
+				// Phase 1: Scan folders (0% → 30%)
 				const folderPaths: string[] = JSON.parse(lib.folderPaths);
 				const allVideoPaths: string[] = [];
-				for (const folderPath of folderPaths) {
+				for (const [fi, folderPath] of folderPaths.entries()) {
+					const folderPct = Math.round((fi / folderPaths.length) * 30);
+					yield* progress(onProgress, folderPct, `Scanning: ${folderPath}`);
 					yield* Effect.logInfo(`Scanning folder: ${folderPath}`);
 					const paths = yield* ffmpeg.scanDirectory(folderPath);
 					yield* Effect.logInfo(
@@ -213,7 +224,7 @@ export const ProcessorServiceLive = Layer.effect(
 
 				yield* progress(
 					onProgress,
-					20,
+					30,
 					`Found ${videoPaths.length} videos on disk.`
 				);
 
@@ -240,7 +251,7 @@ export const ProcessorServiceLive = Layer.effect(
 					);
 				}
 
-				// Check for changed files (size mismatch)
+				// Phase 2: Check for changed files (30% → 90%)
 				const currentVideos = existingVideos.filter((v) =>
 					diskPaths.has(v.filePath)
 				);
@@ -249,28 +260,20 @@ export const ProcessorServiceLive = Layer.effect(
 				);
 
 				const changeProgress: ProgressFn = (pct, msg) =>
-					progress(onProgress, 20 + Math.round(pct * 0.4), msg);
+					progress(onProgress, 30 + Math.round(pct * 0.6), msg);
 				const changed = yield* detectChangedVideos(
 					db,
 					currentVideos,
 					changeProgress
 				);
 
-				if (changed > 0) {
-					yield* progress(
-						onProgress,
-						60,
-						`${changed} videos changed, will re-index.`
-					);
-				}
-
-				// Add new videos
+				// Phase 3: Add new videos (90% → 100%)
 				const existingPaths = new Set(existingVideos.map((v) => v.filePath));
 				const newPaths = videoPaths.filter((p) => !existingPaths.has(p));
 				yield* Effect.logInfo(`New videos to add: ${newPaths.length}`);
 
 				const addProgress: ProgressFn = (pct, msg) =>
-					progress(onProgress, 60 + Math.round(pct * 0.4), msg);
+					progress(onProgress, 90 + Math.round(pct * 0.1), msg);
 				const added = yield* addNewVideos(db, libraryId, newPaths, addProgress);
 
 				yield* Effect.promise(() =>
@@ -360,7 +363,7 @@ export const ProcessorServiceLive = Layer.effect(
 								yield* progress(
 									onProgress,
 									pct,
-									`Chunk ${processed}/${totalChunks} (skipped - still frame)`
+									`${vid.fileName} — Chunk ${processed}/${totalChunks} (skipped)`
 								);
 								return;
 							}
@@ -426,7 +429,7 @@ export const ProcessorServiceLive = Layer.effect(
 							yield* progress(
 								onProgress,
 								pct,
-								`Embedded chunk ${processed}/${totalChunks}`
+								`${vid.fileName} — Chunk ${processed}/${totalChunks}`
 							);
 						}).pipe(
 							Effect.timeout(Duration.minutes(5)),
@@ -448,7 +451,7 @@ export const ProcessorServiceLive = Layer.effect(
 									yield* progress(
 										onProgress,
 										pct,
-										`Chunk ${processed}/${totalChunks} (timed out)`
+										`${vid.fileName} — Chunk ${processed}/${totalChunks} (timed out)`
 									);
 								})
 							)
@@ -505,7 +508,7 @@ export const ProcessorServiceLive = Layer.effect(
 					model: emb.model,
 				};
 
-				yield* progress(onProgress, 0, "Testing embedding API connection...");
+				yield* progress(onProgress, 0, "Testing embedding API...");
 				const preflight = yield* embedSvc.testConnection(embConfig);
 				if (!preflight.ok) {
 					yield* Effect.die(
@@ -533,7 +536,7 @@ export const ProcessorServiceLive = Layer.effect(
 						.where(eq(videoTable.id, videoId))
 				);
 
-				yield* progress(onProgress, 0, `Processing ${vid.fileName}...`);
+				yield* progress(onProgress, 0, `Indexing: ${vid.fileName}`);
 				yield* processVideoForIndexer(db, vid, indexer, onProgress);
 
 				const errorChunks = yield* Effect.promise(() =>
@@ -575,7 +578,64 @@ export const ProcessorServiceLive = Layer.effect(
 				)
 			);
 
-		const indexLibrary = (
+		const indexSingleVideo = (
+			db: Db,
+			vid: typeof videoTable.$inferSelect,
+			indexer: IndexerContext,
+			onProgress?: ProgressFn
+		): Effect.Effect<void, JobCancelledError> =>
+			Effect.gen(function* () {
+				yield* checkCancelled(db, indexer.jobId);
+
+				yield* Effect.promise(() =>
+					db
+						.delete(chunkTable)
+						.where(
+							and(
+								eq(chunkTable.videoId, vid.id),
+								eq(chunkTable.indexerId, indexer.indexerId)
+							)
+						)
+				);
+
+				yield* Effect.promise(() =>
+					db
+						.update(videoTable)
+						.set({ status: "processing" })
+						.where(eq(videoTable.id, vid.id))
+				);
+
+				yield* processVideoForIndexer(db, vid, indexer, onProgress);
+
+				const errorChunks = yield* Effect.promise(() =>
+					db
+						.select({ id: chunkTable.id })
+						.from(chunkTable)
+						.where(
+							and(
+								eq(chunkTable.videoId, vid.id),
+								eq(chunkTable.indexerId, indexer.indexerId),
+								eq(chunkTable.embeddingStatus, "error")
+							)
+						)
+						.all()
+				);
+
+				yield* Effect.promise(() =>
+					db
+						.update(videoTable)
+						.set({
+							status: errorChunks.length > 0 ? "error" : "indexed",
+							errorMessage:
+								errorChunks.length > 0
+									? `${errorChunks.length} chunk(s) failed to embed`
+									: null,
+						})
+						.where(eq(videoTable.id, vid.id))
+				);
+			});
+
+		const resolveIndexer = (
 			db: Db,
 			vectorDbManager: VectorDbManagerShape,
 			libraryId: string,
@@ -583,10 +643,8 @@ export const ProcessorServiceLive = Layer.effect(
 			jobId?: string,
 			onProgress?: ProgressFn
 		): Effect.Effect<
-			void,
-			| LibraryNotFoundError
-			| LibraryEmbeddingNotConfiguredError
-			| JobCancelledError
+			IndexerContext,
+			LibraryNotFoundError | LibraryEmbeddingNotConfiguredError
 		> =>
 			Effect.gen(function* () {
 				const lib = yield* Effect.tryPromise({
@@ -625,7 +683,7 @@ export const ProcessorServiceLive = Layer.effect(
 				};
 
 				yield* Effect.logInfo("Testing embedding API connection...");
-				yield* progress(onProgress, 0, "Testing embedding API connection...");
+				yield* progress(onProgress, 0, "Testing embedding API...");
 				const preflight = yield* embedSvc.testConnection(embConfig);
 				if (!preflight.ok) {
 					yield* Effect.die(
@@ -642,7 +700,7 @@ export const ProcessorServiceLive = Layer.effect(
 					.pipe(Effect.orDie);
 				yield* Effect.logInfo("Vector DB ready");
 
-				const indexer: IndexerContext = {
+				return {
 					indexerId: emb.id,
 					vectorDb,
 					jobId,
@@ -652,15 +710,30 @@ export const ProcessorServiceLive = Layer.effect(
 					chunkOverlap: emb.chunkOverlap,
 					downscaleFps: emb.downscaleFps,
 				};
+			});
 
-				yield* Effect.promise(() =>
-					db
-						.update(libraryTable)
-						.set({ status: "scanning" })
-						.where(eq(libraryTable.id, libraryId))
+		const indexLibrary = (
+			db: Db,
+			vectorDbManager: VectorDbManagerShape,
+			libraryId: string,
+			indexerId: string,
+			jobId?: string,
+			onProgress?: ProgressFn
+		): Effect.Effect<
+			void,
+			| LibraryNotFoundError
+			| LibraryEmbeddingNotConfiguredError
+			| JobCancelledError
+		> =>
+			Effect.gen(function* () {
+				const indexer = yield* resolveIndexer(
+					db,
+					vectorDbManager,
+					libraryId,
+					indexerId,
+					jobId,
+					onProgress
 				);
-
-				yield* scanLibraryFolder(db, libraryId, onProgress);
 
 				yield* Effect.promise(() =>
 					db
@@ -678,70 +751,36 @@ export const ProcessorServiceLive = Layer.effect(
 				);
 
 				const videosToProcess = videos.filter((v) => v.status === "pending");
+
+				if (videosToProcess.length === 0) {
+					yield* progress(onProgress, 100, "No pending videos to index.");
+					yield* Effect.promise(() =>
+						db
+							.update(libraryTable)
+							.set({ status: "ready" })
+							.where(eq(libraryTable.id, libraryId))
+					);
+					return;
+				}
+
 				let processed = 0;
+				const total = videosToProcess.length;
 
 				for (const vid of videosToProcess) {
-					yield* checkCancelled(db, jobId);
-
-					yield* Effect.promise(() =>
-						db
-							.delete(chunkTable)
-							.where(
-								and(
-									eq(chunkTable.videoId, vid.id),
-									eq(chunkTable.indexerId, indexer.indexerId)
-								)
-							)
-					);
-
-					yield* Effect.promise(() =>
-						db
-							.update(videoTable)
-							.set({ status: "processing" })
-							.where(eq(videoTable.id, vid.id))
-					);
-
 					const vidProgress: ProgressFn | undefined = onProgress
 						? (pct, msg) => {
 								const overallPct = Math.round(
-									((processed + pct / 100) / videosToProcess.length) * 100
+									((processed + pct / 100) / total) * 100
 								);
 								return progress(
 									onProgress,
 									overallPct,
-									`Video ${processed + 1}/${videosToProcess.length}: ${msg}`
+									`(${processed + 1}/${total}) ${msg}`
 								);
 							}
 						: undefined;
 
-					yield* processVideoForIndexer(db, vid, indexer, vidProgress);
-
-					const errorChunks = yield* Effect.promise(() =>
-						db
-							.select({ id: chunkTable.id })
-							.from(chunkTable)
-							.where(
-								and(
-									eq(chunkTable.videoId, vid.id),
-									eq(chunkTable.indexerId, indexer.indexerId),
-									eq(chunkTable.embeddingStatus, "error")
-								)
-							)
-							.all()
-					);
-
-					yield* Effect.promise(() =>
-						db
-							.update(videoTable)
-							.set({
-								status: errorChunks.length > 0 ? "error" : "indexed",
-								errorMessage:
-									errorChunks.length > 0
-										? `${errorChunks.length} chunk(s) failed to embed`
-										: null,
-							})
-							.where(eq(videoTable.id, vid.id))
-					);
+					yield* indexSingleVideo(db, vid, indexer, vidProgress);
 					processed++;
 				}
 
@@ -751,8 +790,6 @@ export const ProcessorServiceLive = Layer.effect(
 						.set({ status: "ready" })
 						.where(eq(libraryTable.id, libraryId))
 				);
-
-				yield* progress(onProgress, 100, "Indexing complete.");
 			});
 
 		return { scanLibraryFolder, processVideo, indexLibrary };

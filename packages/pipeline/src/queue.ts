@@ -84,7 +84,7 @@ const updateJobProgress = (
 		Effect.ignore
 	);
 
-const completeJob = (db: Db, jobId: string) =>
+const completeJob = (db: Db, jobId: string, jobType?: string) =>
 	Effect.promise(() =>
 		db
 			.update(jobTable)
@@ -95,11 +95,13 @@ const completeJob = (db: Db, jobId: string) =>
 			})
 			.where(eq(jobTable.id, jobId))
 	).pipe(
-		Effect.tap(() =>
-			Effect.sync(() =>
-				onJobProgress?.(jobId, "completed", 100, "Indexing complete.", null)
-			)
-		),
+		Effect.tap(() => {
+			const message =
+				jobType === "scan_library" ? "Scan complete." : "Indexing complete.";
+			return Effect.sync(() =>
+				onJobProgress?.(jobId, "completed", 100, message, null)
+			);
+		}),
 		Effect.ignore
 	);
 
@@ -478,7 +480,7 @@ export const JobQueueServiceLive = Layer.effect(
 
 					const runJob = (jobRow: typeof jobTable.$inferSelect) =>
 						processJob(jobRow).pipe(
-							Effect.tap(() => completeJob(db, jobRow.id)),
+							Effect.tap(() => completeJob(db, jobRow.id, jobRow.type)),
 							Effect.catchIf(
 								(err): err is JobCancelledError =>
 									err instanceof JobCancelledError,

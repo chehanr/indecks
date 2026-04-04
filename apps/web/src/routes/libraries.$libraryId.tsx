@@ -50,7 +50,7 @@ import {
 } from "@indecks/ui/components/tabs";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
-import { Pencil, Plus, Trash2, X } from "lucide-react";
+import { FolderSearch, Pencil, Plus, Trash2, X } from "lucide-react";
 import { parseAsString, useQueryState } from "nuqs";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -332,10 +332,31 @@ function VideosTab({
 		isDefault: e.isDefault,
 	}));
 
+	const scanMutation = useMutation({
+		mutationFn: () => trpcClient.library.startScan.mutate({ id: libraryId }),
+		onSuccess: (data) => {
+			toast.success("Scan started");
+			onJobStarted?.(data.jobId);
+			queryClient.invalidateQueries({ queryKey: [["job", "list"]] });
+		},
+		onError: (err) => {
+			toast.error(err.message);
+		},
+	});
+
 	return (
 		<div className="space-y-4">
 			<div className="flex items-center justify-between">
 				<h2 className="font-medium text-sm">{videoCount} videos</h2>
+				<Button
+					disabled={scanMutation.isPending}
+					onClick={() => scanMutation.mutate()}
+					size="sm"
+					variant="outline"
+				>
+					<FolderSearch className="size-4" />
+					{scanMutation.isPending ? "Scanning..." : "Scan"}
+				</Button>
 			</div>
 			{videosQuery.isLoading && (
 				<p className="text-muted-foreground text-sm">Loading videos...</p>
