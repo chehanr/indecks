@@ -190,11 +190,19 @@ export const ProcessorServiceLive = Layer.effect(
 				const folderPaths: string[] = JSON.parse(lib.folderPaths);
 				const allVideoPaths: string[] = [];
 				for (const folderPath of folderPaths) {
+					yield* Effect.logInfo(`Scanning folder: ${folderPath}`);
 					const paths = yield* ffmpeg.scanDirectory(folderPath);
+					yield* Effect.logInfo(
+						`Found ${paths.length} videos in ${folderPath}`
+					);
 					allVideoPaths.push(...paths);
 				}
 				const videoPaths = [...new Set(allVideoPaths)];
 				const diskPaths = new Set(videoPaths);
+
+				yield* Effect.logInfo(
+					`Total unique videos on disk: ${videoPaths.length}`
+				);
 
 				const existingVideos = yield* Effect.promise(() =>
 					db
@@ -206,6 +214,10 @@ export const ProcessorServiceLive = Layer.effect(
 						.from(videoTable)
 						.where(eq(videoTable.libraryId, libraryId))
 						.all()
+				);
+
+				yield* Effect.logInfo(
+					`Existing videos in DB: ${existingVideos.length}`
 				);
 
 				// Remove videos whose files no longer exist on disk
@@ -224,9 +236,12 @@ export const ProcessorServiceLive = Layer.effect(
 					);
 				}
 
-				// Check for changed files (hash mismatch)
+				// Check for changed files (size mismatch)
 				const currentVideos = existingVideos.filter((v) =>
 					diskPaths.has(v.filePath)
+				);
+				yield* Effect.logInfo(
+					`Checking ${currentVideos.length} videos for changes`
 				);
 				const changed = yield* detectChangedVideos(db, currentVideos);
 
@@ -241,6 +256,7 @@ export const ProcessorServiceLive = Layer.effect(
 				// Add new videos
 				const existingPaths = new Set(existingVideos.map((v) => v.filePath));
 				const newPaths = videoPaths.filter((p) => !existingPaths.has(p));
+				yield* Effect.logInfo(`New videos to add: ${newPaths.length}`);
 				const added = yield* addNewVideos(db, libraryId, newPaths, onProgress);
 
 				yield* Effect.promise(() =>
@@ -594,6 +610,7 @@ export const ProcessorServiceLive = Layer.effect(
 					model: emb.model,
 				};
 
+				yield* Effect.logInfo("Testing embedding API connection...");
 				yield* progress(onProgress, 0, "Testing embedding API connection...");
 				const preflight = yield* embedSvc.testConnection(embConfig);
 				if (!preflight.ok) {
@@ -603,10 +620,13 @@ export const ProcessorServiceLive = Layer.effect(
 						)
 					);
 				}
+				yield* Effect.logInfo("Embedding API connection OK");
 
+				yield* Effect.logInfo("Opening vector DB...");
 				const vectorDb = yield* vectorDbManager
 					.get(libraryId, emb.id, emb.dimensions)
 					.pipe(Effect.orDie);
+				yield* Effect.logInfo("Vector DB ready");
 
 				const indexer: IndexerContext = {
 					indexerId: emb.id,
