@@ -494,7 +494,10 @@ export const JobQueueServiceLive = Layer.effect(
 
 					const workerLoop = Effect.gen(function* () {
 						while (true) {
-							yield* processAvailable;
+							yield* processAvailable.pipe(
+								Effect.catchAll(() => Effect.void),
+								Effect.catchAllDefect(() => Effect.void)
+							);
 							// Wait for a signal or poll every 30s as fallback
 							yield* Queue.take(notifyQueue).pipe(
 								Effect.timeout(Duration.seconds(30)),
@@ -505,11 +508,7 @@ export const JobQueueServiceLive = Layer.effect(
 						}
 					});
 
-					return yield* workerLoop.pipe(
-						Effect.catchAll(() => Effect.void),
-						Effect.asVoid,
-						Effect.forkDaemon
-					);
+					return yield* workerLoop.pipe(Effect.asVoid, Effect.forkDaemon);
 				}),
 		};
 	})
