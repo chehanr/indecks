@@ -365,7 +365,32 @@ export const ProcessorServiceLive = Layer.effect(
 				yield* Effect.logInfo(
 					`${vid.fileName}: ${totalChunks} chunks (concurrency: ${ctx.concurrency})`
 				);
+
+				// Bulk-insert all chunk records upfront
+				if (totalChunks > 0) {
+					yield* Effect.promise(() =>
+						db
+							.insert(chunkTable)
+							.values(
+								chunks.map((c) => ({
+									id: makeChunkId(vid.id, ctx.indexerId, c.startTime),
+									videoId: vid.id,
+									indexerId: ctx.indexerId,
+									startTime: c.startTime,
+									endTime: c.endTime,
+									isStillFrame: false,
+									embeddingStatus: "pending" as const,
+								}))
+							)
+							.onConflictDoNothing()
+					);
+				}
+
 				let processed = 0;
+				const pendingUpserts: Array<{
+					chunkId: string;
+					embedding: Float32Array;
+				}> = [];
 
 				const processChunk = (
 					chunkInfo: (typeof chunks)[number]
@@ -377,24 +402,22 @@ export const ProcessorServiceLive = Layer.effect(
 							ctx.indexerId,
 							chunkInfo.startTime
 						);
-						const still = yield* ffmpeg.isStillFrame(chunkInfo.chunkPath);
-
-						yield* Effect.promise(() =>
-							db
-								.insert(chunkTable)
-								.values({
-									id: chunkId,
-									videoId: vid.id,
-									indexerId: ctx.indexerId,
-									startTime: chunkInfo.startTime,
-									endTime: chunkInfo.endTime,
-									isStillFrame: still,
-									embeddingStatus: still ? "skipped" : "pending",
-								})
-								.onConflictDoNothing()
+						const chunkDuration = chunkInfo.endTime - chunkInfo.startTime;
+						const still = yield* ffmpeg.isStillFrame(
+							chunkInfo.chunkPath,
+							chunkDuration
 						);
 
 						if (still) {
+							yield* Effect.promise(() =>
+								db
+									.update(chunkTable)
+									.set({
+										isStillFrame: true,
+										embeddingStatus: "skipped",
+									})
+									.where(eq(chunkTable.id, chunkId))
+							);
 							return;
 						}
 
@@ -406,13 +429,10 @@ export const ProcessorServiceLive = Layer.effect(
 							ctx.config,
 							ctx.instruction
 						);
-						yield* ctx.vectorDb.upsert(chunkId, new Float32Array(embedding));
-						yield* Effect.promise(() =>
-							db
-								.update(chunkTable)
-								.set({ embeddingStatus: "embedded" })
-								.where(eq(chunkTable.id, chunkId))
-						);
+						pendingUpserts.push({
+							chunkId,
+							embedding: new Float32Array(embedding),
+						});
 					});
 
 				const markChunkError = (
@@ -462,6 +482,24 @@ export const ProcessorServiceLive = Layer.effect(
 						),
 					{ concurrency: ctx.concurrency }
 				);
+
+				// Batch upsert all embeddings to vector DB
+				if (pendingUpserts.length > 0) {
+					yield* ctx.vectorDb.upsertBatch(pendingUpserts).pipe(
+						Effect.tap(() => {
+							const embeddedIds = pendingUpserts.map((u) => u.chunkId);
+							return Effect.promise(() =>
+								db
+									.update(chunkTable)
+									.set({ embeddingStatus: "embedded" })
+									.where(inArray(chunkTable.id, embeddedIds))
+							);
+						}),
+						Effect.catchAll((err) =>
+							Effect.logError(`Batch upsert failed for ${vid.fileName}: ${err}`)
+						)
+					);
+				}
 
 				yield* ffmpeg.cleanupChunks(chunks);
 			});

@@ -137,6 +137,7 @@ export interface FFmpegServiceShape {
 	) => Effect.Effect<number, FFmpegError>;
 	readonly isStillFrame: (
 		chunkPath: string,
+		duration: number,
 		threshold?: number
 	) => Effect.Effect<boolean>;
 	readonly scanDirectory: (dirPath: string) => Effect.Effect<string[]>;
@@ -271,17 +272,8 @@ export const FFmpegServiceLive = Layer.effect(
 					return outPath;
 				}),
 
-			isStillFrame: (chunkPath, threshold = 0.98) =>
+			isStillFrame: (chunkPath, duration, threshold = 0.98) =>
 				Effect.gen(function* () {
-					const durationResult = yield* getVideoDuration(
-						executor,
-						chunkPath
-					).pipe(Effect.option);
-
-					if (durationResult._tag === "None") {
-						return false;
-					}
-					const duration = durationResult.value;
 					if (duration < 0.5) {
 						return false;
 					}
