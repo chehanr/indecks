@@ -93,6 +93,7 @@ export const ProcessorServiceLive = Layer.effect(
 			filePath: string;
 			fileSize: number | null;
 			id: string;
+			modifiedAt: Date | null;
 		}
 
 		const detectChangedVideos = (
@@ -102,42 +103,67 @@ export const ProcessorServiceLive = Layer.effect(
 		): Effect.Effect<number> =>
 			Effect.gen(function* () {
 				let changed = 0;
+				let checked = 0;
 				const total = videos.length;
-				for (const [i, vid] of videos.entries()) {
-					if (i % 10 === 0 || i === total - 1) {
-						const pct = Math.round((i / total) * 100);
-						yield* progress(
-							onProgress,
-							pct,
-							`Checking: ${basename(vid.filePath)} (${i + 1}/${total})`
-						);
-					}
-					const fileStat = yield* fs.stat(vid.filePath).pipe(Effect.option);
-					if (fileStat._tag === "None") {
-						continue;
-					}
-					const currentSize = Number(fileStat.value.size);
-					if (vid.fileSize !== null && vid.fileSize !== currentSize) {
-						yield* Effect.promise(() =>
-							db.delete(chunkTable).where(eq(chunkTable.videoId, vid.id))
-						);
-						const duration = yield* ffmpeg
-							.getVideoDuration(vid.filePath)
-							.pipe(Effect.option);
-						yield* Effect.promise(() =>
-							db
-								.update(videoTable)
-								.set({
-									fileSize: currentSize,
-									duration: duration._tag === "Some" ? duration.value : null,
-									status: "pending",
-									errorMessage: null,
-								})
-								.where(eq(videoTable.id, vid.id))
-						);
-						changed++;
-					}
-				}
+
+				yield* Effect.forEach(
+					videos,
+					(vid) =>
+						Effect.gen(function* () {
+							const bunFile = Bun.file(vid.filePath);
+							const exists = yield* Effect.promise(() => bunFile.exists());
+							checked++;
+
+							if (checked % 10 === 0 || checked === total) {
+								const pct = Math.round((checked / total) * 100);
+								yield* progress(
+									onProgress,
+									pct,
+									`Checking: ${basename(vid.filePath)} (${checked}/${total})`
+								);
+							}
+
+							if (!exists) {
+								return;
+							}
+
+							const currentSize = bunFile.size;
+							const currentMtime = bunFile.lastModified;
+							const dbMtime = vid.modifiedAt?.getTime() ?? null;
+
+							// Skip if both mtime and size match
+							if (
+								dbMtime !== null &&
+								currentMtime === dbMtime &&
+								vid.fileSize === currentSize
+							) {
+								return;
+							}
+
+							// Changed — reset for re-indexing
+							yield* Effect.promise(() =>
+								db.delete(chunkTable).where(eq(chunkTable.videoId, vid.id))
+							);
+							const duration = yield* ffmpeg
+								.getVideoDuration(vid.filePath)
+								.pipe(Effect.option);
+							yield* Effect.promise(() =>
+								db
+									.update(videoTable)
+									.set({
+										fileSize: currentSize,
+										modifiedAt: new Date(currentMtime),
+										duration: duration._tag === "Some" ? duration.value : null,
+										status: "pending",
+										errorMessage: null,
+									})
+									.where(eq(videoTable.id, vid.id))
+							);
+							changed++;
+						}),
+					{ concurrency: 20 }
+				);
+
 				return changed;
 			});
 
@@ -151,7 +177,7 @@ export const ProcessorServiceLive = Layer.effect(
 				let added = 0;
 				for (const filePath of newPaths) {
 					const fileName = filePath.split("/").pop() ?? filePath;
-					const fileStat = yield* fs.stat(filePath).pipe(Effect.orDie);
+					const bunFile = Bun.file(filePath);
 					const duration = yield* ffmpeg
 						.getVideoDuration(filePath)
 						.pipe(Effect.option);
@@ -162,7 +188,8 @@ export const ProcessorServiceLive = Layer.effect(
 							libraryId,
 							filePath,
 							fileName,
-							fileSize: Number(fileStat.size),
+							fileSize: bunFile.size,
+							modifiedAt: new Date(bunFile.lastModified),
 							duration: duration._tag === "Some" ? duration.value : null,
 							status: "pending",
 						})
@@ -234,6 +261,7 @@ export const ProcessorServiceLive = Layer.effect(
 							id: videoTable.id,
 							filePath: videoTable.filePath,
 							fileSize: videoTable.fileSize,
+							modifiedAt: videoTable.modifiedAt,
 						})
 						.from(videoTable)
 						.where(eq(videoTable.libraryId, libraryId))

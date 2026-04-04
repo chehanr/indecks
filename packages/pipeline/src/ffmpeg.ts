@@ -150,6 +150,32 @@ export const FFmpegServiceLive = Layer.effect(
 		const fs = yield* FileSystem.FileSystem;
 		const executor = yield* CommandExecutor.CommandExecutor;
 
+		const collectFrameSizes = (
+			fsService: typeof fs,
+			tmpDir: string,
+			count: number
+		): Effect.Effect<number[]> =>
+			Effect.gen(function* () {
+				const sizes: number[] = [];
+				for (let i = 0; i < count; i++) {
+					const framePath = join(
+						tmpDir,
+						`frame_${String(i).padStart(3, "0")}.jpg`
+					);
+					const exists = yield* fsService
+						.exists(framePath)
+						.pipe(Effect.orElseSucceed(() => false));
+					if (exists) {
+						const info = yield* fsService.stat(framePath).pipe(Effect.option);
+						if (info._tag === "Some") {
+							sizes.push(Number(info.value.size));
+						}
+					}
+					yield* fsService.remove(framePath).pipe(Effect.ignore);
+				}
+				return sizes;
+			});
+
 		return {
 			getVideoDuration: (filePath) => getVideoDuration(executor, filePath),
 
@@ -295,23 +321,7 @@ export const FFmpegServiceLive = Layer.effect(
 						{ concurrency: 3 }
 					);
 
-					const sizes: number[] = [];
-					for (let i = 0; i < 3; i++) {
-						const framePath = join(
-							tmpDir,
-							`frame_${String(i).padStart(3, "0")}.jpg`
-						);
-						const exists = yield* fs
-							.exists(framePath)
-							.pipe(Effect.orElseSucceed(() => false));
-						if (exists) {
-							const info = yield* fs.stat(framePath).pipe(Effect.option);
-							if (info._tag === "Some") {
-								sizes.push(Number(info.value.size));
-							}
-						}
-						yield* fs.remove(framePath).pipe(Effect.ignore);
-					}
+					const sizes = yield* collectFrameSizes(fs, tmpDir, 3);
 					yield* fs.remove(tmpDir, { recursive: true }).pipe(Effect.ignore);
 
 					if (sizes.length < 2) {
