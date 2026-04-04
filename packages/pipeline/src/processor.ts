@@ -89,6 +89,74 @@ export const ProcessorServiceLive = Layer.effect(
 		const embedSvc = yield* EmbedService;
 		const fs = yield* FileSystem.FileSystem;
 
+		const processDiscoveredFile = (
+			db: Db,
+			libraryId: string,
+			filePath: string,
+			existing: ExistingVideo | undefined
+		): Effect.Effect<"added" | "changed" | "unchanged"> =>
+			Effect.gen(function* () {
+				const fileName = basename(filePath);
+
+				if (existing) {
+					const bunFile = Bun.file(filePath);
+					const exists = yield* Effect.promise(() => bunFile.exists());
+					if (!exists) {
+						return "unchanged";
+					}
+
+					const currentSize = bunFile.size;
+					const currentMtime = bunFile.lastModified;
+					const dbMtime = existing.modifiedAt?.getTime() ?? null;
+
+					if (
+						dbMtime !== null &&
+						currentMtime === dbMtime &&
+						existing.fileSize === currentSize
+					) {
+						return "unchanged";
+					}
+
+					yield* Effect.promise(() =>
+						db.delete(chunkTable).where(eq(chunkTable.videoId, existing.id))
+					);
+					const duration = yield* ffmpeg
+						.getVideoDuration(filePath)
+						.pipe(Effect.option);
+					yield* Effect.promise(() =>
+						db
+							.update(videoTable)
+							.set({
+								fileSize: currentSize,
+								modifiedAt: new Date(currentMtime),
+								duration: duration._tag === "Some" ? duration.value : null,
+								status: "pending",
+								errorMessage: null,
+							})
+							.where(eq(videoTable.id, existing.id))
+					);
+					return "changed";
+				}
+
+				const bunFile = Bun.file(filePath);
+				const duration = yield* ffmpeg
+					.getVideoDuration(filePath)
+					.pipe(Effect.option);
+				yield* Effect.promise(() =>
+					db.insert(videoTable).values({
+						id: nanoid(),
+						libraryId,
+						filePath,
+						fileName,
+						fileSize: bunFile.size,
+						modifiedAt: new Date(bunFile.lastModified),
+						duration: duration._tag === "Some" ? duration.value : null,
+						status: "pending",
+					})
+				);
+				return "added";
+			});
+
 		interface ExistingVideo {
 			filePath: string;
 			fileSize: number | null;
@@ -96,114 +164,69 @@ export const ProcessorServiceLive = Layer.effect(
 			modifiedAt: Date | null;
 		}
 
-		const detectChangedVideos = (
-			db: Db,
-			videos: ExistingVideo[],
+		const discoverVideoPaths = (
+			folderPaths: string[],
 			onProgress?: ProgressFn
-		): Effect.Effect<number> =>
+		): Effect.Effect<string[]> =>
 			Effect.gen(function* () {
-				let changed = 0;
-				let checked = 0;
-				const total = videos.length;
+				const allVideoPaths: string[] = [];
+				for (const [fi, folderPath] of folderPaths.entries()) {
+					const folderPct = Math.round((fi / folderPaths.length) * 10);
+					yield* progress(onProgress, folderPct, `Scanning: ${folderPath}`);
+					yield* Effect.logInfo(`Scanning folder: ${folderPath}`);
+					const paths = yield* ffmpeg.scanDirectory(folderPath);
+					yield* Effect.logInfo(
+						`Found ${paths.length} videos in ${folderPath}`
+					);
+					allVideoPaths.push(...paths);
+				}
+				return [...new Set(allVideoPaths)];
+			});
+
+		const processAndCountFiles = (
+			db: Db,
+			libraryId: string,
+			videoPaths: string[],
+			dbByPath: Map<string, ExistingVideo>,
+			onProgress?: ProgressFn
+		): Effect.Effect<{ added: number; changed: number }> =>
+			Effect.gen(function* () {
+				const results: string[] = [];
+				const total = videoPaths.length;
 
 				yield* Effect.forEach(
-					videos,
-					(vid) =>
+					videoPaths,
+					(filePath, i) =>
 						Effect.gen(function* () {
-							const bunFile = Bun.file(vid.filePath);
-							const exists = yield* Effect.promise(() => bunFile.exists());
-							checked++;
+							const existing = dbByPath.get(filePath);
+							if (existing) {
+								dbByPath.delete(filePath);
+							}
 
-							if (checked % 10 === 0 || checked === total) {
-								const pct = Math.round((checked / total) * 100);
+							const result = yield* processDiscoveredFile(
+								db,
+								libraryId,
+								filePath,
+								existing
+							);
+							results.push(result);
+
+							if (i % 10 === 0 || i === total - 1) {
+								const pct = 10 + Math.round(((i + 1) / total) * 85);
 								yield* progress(
 									onProgress,
 									pct,
-									`Checking: ${basename(vid.filePath)} (${checked}/${total})`
+									`Processing: ${basename(filePath)} (${i + 1}/${total})`
 								);
 							}
-
-							if (!exists) {
-								return;
-							}
-
-							const currentSize = bunFile.size;
-							const currentMtime = bunFile.lastModified;
-							const dbMtime = vid.modifiedAt?.getTime() ?? null;
-
-							// Skip if both mtime and size match
-							if (
-								dbMtime !== null &&
-								currentMtime === dbMtime &&
-								vid.fileSize === currentSize
-							) {
-								return;
-							}
-
-							// Changed — reset for re-indexing
-							yield* Effect.promise(() =>
-								db.delete(chunkTable).where(eq(chunkTable.videoId, vid.id))
-							);
-							const duration = yield* ffmpeg
-								.getVideoDuration(vid.filePath)
-								.pipe(Effect.option);
-							yield* Effect.promise(() =>
-								db
-									.update(videoTable)
-									.set({
-										fileSize: currentSize,
-										modifiedAt: new Date(currentMtime),
-										duration: duration._tag === "Some" ? duration.value : null,
-										status: "pending",
-										errorMessage: null,
-									})
-									.where(eq(videoTable.id, vid.id))
-							);
-							changed++;
 						}),
-					{ concurrency: 20 }
+					{ concurrency: 5 }
 				);
 
-				return changed;
-			});
-
-		const addNewVideos = (
-			db: Db,
-			libraryId: string,
-			newPaths: string[],
-			onProgress?: ProgressFn
-		): Effect.Effect<number> =>
-			Effect.gen(function* () {
-				let added = 0;
-				for (const filePath of newPaths) {
-					const fileName = filePath.split("/").pop() ?? filePath;
-					const bunFile = Bun.file(filePath);
-					const duration = yield* ffmpeg
-						.getVideoDuration(filePath)
-						.pipe(Effect.option);
-
-					yield* Effect.promise(() =>
-						db.insert(videoTable).values({
-							id: nanoid(),
-							libraryId,
-							filePath,
-							fileName,
-							fileSize: bunFile.size,
-							modifiedAt: new Date(bunFile.lastModified),
-							duration: duration._tag === "Some" ? duration.value : null,
-							status: "pending",
-						})
-					);
-
-					added++;
-					const pct = Math.round((added / newPaths.length) * 100);
-					yield* progress(
-						onProgress,
-						pct,
-						`Adding: ${fileName} (${added}/${newPaths.length})`
-					);
-				}
-				return added;
+				return {
+					added: results.filter((r) => r === "added").length,
+					changed: results.filter((r) => r === "changed").length,
+				};
 			});
 
 		const scanLibraryFolder = (
@@ -233,27 +256,8 @@ export const ProcessorServiceLive = Layer.effect(
 						.where(eq(libraryTable.id, libraryId))
 				);
 
-				// Phase 1: Scan folders (0% → 30%)
 				const folderPaths: string[] = JSON.parse(lib.folderPaths);
-				const allVideoPaths: string[] = [];
-				for (const [fi, folderPath] of folderPaths.entries()) {
-					const folderPct = Math.round((fi / folderPaths.length) * 30);
-					yield* progress(onProgress, folderPct, `Scanning: ${folderPath}`);
-					yield* Effect.logInfo(`Scanning folder: ${folderPath}`);
-					const paths = yield* ffmpeg.scanDirectory(folderPath);
-					yield* Effect.logInfo(
-						`Found ${paths.length} videos in ${folderPath}`
-					);
-					allVideoPaths.push(...paths);
-				}
-				const videoPaths = [...new Set(allVideoPaths)];
-				const diskPaths = new Set(videoPaths);
-
-				yield* progress(
-					onProgress,
-					30,
-					`Found ${videoPaths.length} videos on disk.`
-				);
+				const videoPaths = yield* discoverVideoPaths(folderPaths, onProgress);
 
 				const existingVideos = yield* Effect.promise(() =>
 					db
@@ -267,42 +271,29 @@ export const ProcessorServiceLive = Layer.effect(
 						.where(eq(videoTable.libraryId, libraryId))
 						.all()
 				);
+				const dbByPath = new Map(existingVideos.map((v) => [v.filePath, v]));
 
-				// Remove videos whose files no longer exist on disk
-				const staleIds = existingVideos
-					.filter((v) => !diskPaths.has(v.filePath))
-					.map((v) => v.id);
+				yield* progress(
+					onProgress,
+					10,
+					`Found ${videoPaths.length} videos. Processing...`
+				);
 
+				const { added, changed } = yield* processAndCountFiles(
+					db,
+					libraryId,
+					videoPaths,
+					dbByPath,
+					onProgress
+				);
+
+				// Remove stale videos (in DB but not on disk)
+				const staleIds = [...dbByPath.values()].map((v) => v.id);
 				if (staleIds.length > 0) {
 					yield* Effect.promise(() =>
 						db.delete(videoTable).where(inArray(videoTable.id, staleIds))
 					);
 				}
-
-				// Phase 2: Check for changed files (30% → 90%)
-				const currentVideos = existingVideos.filter((v) =>
-					diskPaths.has(v.filePath)
-				);
-				yield* Effect.logInfo(
-					`Checking ${currentVideos.length} videos for changes`
-				);
-
-				const changeProgress: ProgressFn = (pct, msg) =>
-					progress(onProgress, 30 + Math.round(pct * 0.6), msg);
-				const changed = yield* detectChangedVideos(
-					db,
-					currentVideos,
-					changeProgress
-				);
-
-				// Phase 3: Add new videos (90% → 100%)
-				const existingPaths = new Set(existingVideos.map((v) => v.filePath));
-				const newPaths = videoPaths.filter((p) => !existingPaths.has(p));
-				yield* Effect.logInfo(`New videos to add: ${newPaths.length}`);
-
-				const addProgress: ProgressFn = (pct, msg) =>
-					progress(onProgress, 90 + Math.round(pct * 0.1), msg);
-				const added = yield* addNewVideos(db, libraryId, newPaths, addProgress);
 
 				yield* Effect.promise(() =>
 					db
