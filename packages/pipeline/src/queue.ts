@@ -35,6 +35,7 @@ type ProgressFn = (progress: number, message: string) => Effect.Effect<void>;
 const claimNextJob = (db: Db) =>
 	Effect.tryPromise({
 		try: async () => {
+			console.info("[worker] claimNextJob query...");
 			const pending = await db
 				.select()
 				.from(jobTable)
@@ -493,8 +494,9 @@ export const JobQueueServiceLive = Layer.effect(
 					});
 
 					const workerLoop = Effect.gen(function* () {
-						console.info("[worker] started");
+						console.info("[worker] loop starting");
 						while (true) {
+							console.info("[worker] claiming...");
 							yield* processAvailable.pipe(
 								Effect.tap(() =>
 									Effect.sync(() => console.info("[worker] processed batch"))
