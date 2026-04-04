@@ -251,6 +251,10 @@ export const ProcessorServiceLive = Layer.effect(
 					return yield* new LibraryNotFoundError({ libraryId });
 				}
 
+				yield* Effect.logInfo(
+					`Starting scan for library ${lib.name} (${libraryId})`
+				);
+
 				yield* Effect.promise(() =>
 					db
 						.update(libraryTable)
@@ -305,6 +309,9 @@ export const ProcessorServiceLive = Layer.effect(
 						.where(eq(libraryTable.id, libraryId))
 				);
 
+				yield* Effect.logInfo(
+					`Scan complete for ${lib.name}: ${added} added, ${changed} changed, ${removed} removed`
+				);
 				yield* progress(
 					onProgress,
 					100,
@@ -353,6 +360,9 @@ export const ProcessorServiceLive = Layer.effect(
 					);
 
 				const totalChunks = chunks.length;
+				yield* Effect.logInfo(
+					`${vid.fileName}: ${totalChunks} chunks (concurrency: ${ctx.concurrency})`
+				);
 				let processed = 0;
 
 				const processChunk = (
@@ -761,6 +771,10 @@ export const ProcessorServiceLive = Layer.effect(
 					onProgress
 				);
 
+				yield* Effect.logInfo(
+					`Starting indexing for library ${libraryId} with indexer ${indexerId}`
+				);
+
 				yield* Effect.promise(() =>
 					db
 						.update(libraryTable)
@@ -781,6 +795,7 @@ export const ProcessorServiceLive = Layer.effect(
 				);
 
 				if (videosToProcess.length === 0) {
+					yield* Effect.logInfo("No pending videos to index");
 					yield* progress(onProgress, 100, "No pending videos to index.");
 					yield* Effect.promise(() =>
 						db
@@ -791,10 +806,18 @@ export const ProcessorServiceLive = Layer.effect(
 					return;
 				}
 
+				yield* Effect.logInfo(
+					`Indexing ${videosToProcess.length} videos (concurrency: ${indexer.concurrency})`
+				);
+
 				let processed = 0;
 				const total = videosToProcess.length;
 
 				for (const vid of videosToProcess) {
+					yield* Effect.logInfo(
+						`Indexing video ${processed + 1}/${total}: ${vid.fileName}`
+					);
+
 					const vidProgress: ProgressFn | undefined = onProgress
 						? (pct, msg) => {
 								const overallPct = Math.round(
@@ -811,6 +834,10 @@ export const ProcessorServiceLive = Layer.effect(
 					yield* indexSingleVideo(db, vid, indexer, vidProgress);
 					processed++;
 				}
+
+				yield* Effect.logInfo(
+					`Indexing complete: ${processed} videos processed`
+				);
 
 				yield* Effect.promise(() =>
 					db
