@@ -10,25 +10,18 @@ import { FFmpegError } from "./errors";
 const SUPPORTED_EXTENSIONS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm"]);
 const MP4_EXT = /\.mp4$/;
 
-const walkVideoDir = (
+const findVideos = (
 	fsService: FileSystem.FileSystem,
-	dir: string,
-	videos: string[]
-): Effect.Effect<void, PlatformError> =>
+	dir: string
+): Effect.Effect<string[], PlatformError> =>
 	Effect.gen(function* () {
-		const entries = yield* fsService.readDirectory(dir);
-		for (const entry of entries) {
-			const fullPath = join(dir, entry);
-			const info = yield* fsService.stat(fullPath);
-			if (info.type === "Directory") {
-				yield* walkVideoDir(fsService, fullPath, videos);
-			} else if (info.type === "File") {
+		const entries = yield* fsService.readDirectory(dir, { recursive: true });
+		return entries
+			.filter((entry) => {
 				const ext = entry.slice(entry.lastIndexOf(".")).toLowerCase();
-				if (SUPPORTED_EXTENSIONS.has(ext)) {
-					videos.push(fullPath);
-				}
-			}
-		}
+				return SUPPORTED_EXTENSIONS.has(ext);
+			})
+			.map((entry) => join(dir, entry));
 	});
 
 export interface ChunkInfo {
@@ -338,8 +331,7 @@ export const FFmpegServiceLive = Layer.effect(
 			scanDirectory: (dirPath) =>
 				Effect.gen(function* () {
 					const absDir = resolve(dirPath);
-					const videos: string[] = [];
-					yield* walkVideoDir(fs, absDir, videos).pipe(Effect.ignore);
+					const videos = yield* findVideos(fs, absDir);
 					videos.sort();
 					return videos;
 				}).pipe(Effect.catchAll(() => Effect.succeed([] as string[]))),
