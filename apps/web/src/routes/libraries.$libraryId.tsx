@@ -399,6 +399,7 @@ function IndexerFormFields({
 		chunkDuration: number;
 		chunkOverlap: number;
 		downscaleFps: number;
+		indexConcurrency: number;
 	};
 	onChange: (field: string, value: string | number) => void;
 	idPrefix: string;
@@ -508,6 +509,24 @@ function IndexerFormFields({
 					value={values.downscaleFps}
 				/>
 			</Field>
+			<Field>
+				<FieldLabel htmlFor={`${idPrefix}-indexConcurrency`}>
+					Index Concurrency
+				</FieldLabel>
+				<Input
+					id={`${idPrefix}-indexConcurrency`}
+					max={16}
+					min={1}
+					onChange={(e) =>
+						onChange(
+							"indexConcurrency",
+							Number.parseInt(e.target.value, 10) || 3
+						)
+					}
+					type="number"
+					value={values.indexConcurrency}
+				/>
+			</Field>
 		</>
 	);
 }
@@ -522,6 +541,7 @@ function useIndexerFormState(initial?: {
 	chunkDuration: number;
 	chunkOverlap: number;
 	downscaleFps: number;
+	indexConcurrency: number;
 }) {
 	const [values, setValues] = useState({
 		name: initial?.name ?? "",
@@ -533,6 +553,7 @@ function useIndexerFormState(initial?: {
 		chunkDuration: initial?.chunkDuration ?? 30,
 		chunkOverlap: initial?.chunkOverlap ?? 5,
 		downscaleFps: initial?.downscaleFps ?? 5,
+		indexConcurrency: initial?.indexConcurrency ?? 3,
 	});
 
 	const onChange = (field: string, value: string | number) => {
@@ -565,6 +586,7 @@ function AddIndexerDialog({ libraryId }: { libraryId: string }) {
 				chunkDuration: values.chunkDuration,
 				chunkOverlap: values.chunkOverlap,
 				downscaleFps: values.downscaleFps,
+				indexConcurrency: values.indexConcurrency,
 			}),
 		onSuccess: () => {
 			toast.success("Indexer added");
@@ -662,6 +684,7 @@ function EditIndexerDialog({
 		chunkDuration: number;
 		chunkOverlap: number;
 		downscaleFps: number;
+		indexConcurrency: number;
 	};
 }) {
 	const [open, setOpen] = useState(false);
@@ -680,6 +703,7 @@ function EditIndexerDialog({
 				chunkDuration: values.chunkDuration,
 				chunkOverlap: values.chunkOverlap,
 				downscaleFps: values.downscaleFps,
+				indexConcurrency: values.indexConcurrency,
 			}),
 		onSuccess: () => {
 			toast.success("Indexer updated");
@@ -830,6 +854,7 @@ function IndexerCard({
 		chunkDuration: number;
 		chunkOverlap: number;
 		downscaleFps: number;
+		indexConcurrency: number;
 	};
 	libraryId: string;
 	onJobStarted?: (jobId: string) => void;
@@ -873,7 +898,7 @@ function IndexerCard({
 				<p className="text-muted-foreground text-xs">
 					{indexer.model} ({indexer.dimensions}d) | chunk:{" "}
 					{indexer.chunkDuration}s, overlap: {indexer.chunkOverlap}s, fps:{" "}
-					{indexer.downscaleFps}
+					{indexer.downscaleFps}, concurrency: {indexer.indexConcurrency}
 				</p>
 				<p className="truncate text-muted-foreground text-xs">
 					{indexer.baseUrl}
@@ -1127,12 +1152,20 @@ function SearchTab({ libraryId }: { libraryId: string }) {
 function EditLibraryDialog({
 	library,
 }: {
-	library: { id: string; name: string; folderPaths: string };
+	library: {
+		id: string;
+		name: string;
+		folderPaths: string;
+		scanConcurrency: number;
+	};
 }) {
 	const [open, setOpen] = useState(false);
 	const [name, setName] = useState(library.name);
 	const [folderPaths, setFolderPaths] = useState<string[]>(() =>
 		JSON.parse(library.folderPaths)
+	);
+	const [scanConcurrency, setScanConcurrency] = useState(
+		library.scanConcurrency
 	);
 
 	const handleOpen = (next: boolean) => {
@@ -1140,6 +1173,7 @@ function EditLibraryDialog({
 		if (next) {
 			setName(library.name);
 			setFolderPaths(JSON.parse(library.folderPaths));
+			setScanConcurrency(library.scanConcurrency);
 		}
 	};
 
@@ -1149,6 +1183,7 @@ function EditLibraryDialog({
 				id: library.id,
 				name,
 				folderPaths: folderPaths.filter((p) => p.trim()),
+				scanConcurrency,
 			}),
 		onSuccess: () => {
 			toast.success("Library updated");
@@ -1234,6 +1269,21 @@ function EditLibraryDialog({
 									Add Path
 								</Button>
 							</div>
+						</Field>
+						<Field>
+							<FieldLabel htmlFor="edit-lib-scanConcurrency">
+								Scan Concurrency
+							</FieldLabel>
+							<Input
+								id="edit-lib-scanConcurrency"
+								max={16}
+								min={1}
+								onChange={(e) =>
+									setScanConcurrency(Number.parseInt(e.target.value, 10) || 3)
+								}
+								type="number"
+								value={scanConcurrency}
+							/>
 						</Field>
 						<Button
 							disabled={!canSubmit || updateMutation.isPending}

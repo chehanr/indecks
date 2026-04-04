@@ -62,6 +62,7 @@ export const libraryRouter = router({
 			z.object({
 				name: z.string().min(1),
 				folderPaths: z.array(z.string().min(1)).min(1),
+				scanConcurrency: z.number().min(1).max(16).default(3),
 			})
 		)
 		.mutation(({ ctx, input }) =>
@@ -89,6 +90,7 @@ export const libraryRouter = router({
 							id,
 							name: input.name,
 							folderPaths: JSON.stringify(input.folderPaths),
+							scanConcurrency: input.scanConcurrency,
 						})
 					);
 
@@ -103,6 +105,7 @@ export const libraryRouter = router({
 				id: z.string(),
 				name: z.string().min(1).optional(),
 				folderPaths: z.array(z.string().min(1)).min(1).optional(),
+				scanConcurrency: z.number().min(1).max(16).optional(),
 			})
 		)
 		.mutation(({ ctx, input }) =>
@@ -130,6 +133,9 @@ export const libraryRouter = router({
 							);
 						}
 						set.folderPaths = JSON.stringify(fields.folderPaths);
+					}
+					if (fields.scanConcurrency !== undefined) {
+						set.scanConcurrency = fields.scanConcurrency;
 					}
 
 					yield* Effect.promise(() =>

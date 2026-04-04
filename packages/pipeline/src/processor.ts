@@ -27,6 +27,7 @@ type ProgressFn = (progress: number, message: string) => Effect.Effect<void>;
 export interface IndexerContext {
 	readonly chunkDuration: number;
 	readonly chunkOverlap: number;
+	readonly concurrency: number;
 	readonly config: EmbedConfig;
 	readonly downscaleFps: number;
 	readonly indexerId: string;
@@ -172,6 +173,7 @@ export const ProcessorServiceLive = Layer.effect(
 			libraryId: string,
 			videoPaths: string[],
 			existingByPath: Map<string, ExistingVideo>,
+			concurrency: number,
 			onProgress?: ProgressFn
 		): Effect.Effect<{ added: number; changed: number; removed: number }> =>
 			Effect.gen(function* () {
@@ -216,7 +218,7 @@ export const ProcessorServiceLive = Layer.effect(
 							activeFiles.delete(filePath);
 							yield* report();
 						}),
-					{ concurrency: 3 }
+					{ concurrency }
 				);
 
 				const staleIds = [...existingByPath.values()].map((v) => v.id);
@@ -289,6 +291,7 @@ export const ProcessorServiceLive = Layer.effect(
 					libraryId,
 					videoPaths,
 					existingByPath,
+					lib.scanConcurrency,
 					onProgress
 				);
 
@@ -450,7 +453,7 @@ export const ProcessorServiceLive = Layer.effect(
 								);
 							})
 						),
-					{ concurrency: 4 }
+					{ concurrency: ctx.concurrency }
 				);
 
 				yield* ffmpeg.cleanupChunks(chunks);
@@ -520,6 +523,7 @@ export const ProcessorServiceLive = Layer.effect(
 					instruction: emb.instruction ?? undefined,
 					chunkDuration: emb.chunkDuration,
 					chunkOverlap: emb.chunkOverlap,
+					concurrency: emb.indexConcurrency,
 					downscaleFps: emb.downscaleFps,
 				};
 
@@ -729,6 +733,7 @@ export const ProcessorServiceLive = Layer.effect(
 					instruction: emb.instruction ?? undefined,
 					chunkDuration: emb.chunkDuration,
 					chunkOverlap: emb.chunkOverlap,
+					concurrency: emb.indexConcurrency,
 					downscaleFps: emb.downscaleFps,
 				};
 			});

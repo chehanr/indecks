@@ -68,6 +68,7 @@ export const indexerRouter = router({
 				chunkDuration: z.number().min(1).default(30),
 				chunkOverlap: z.number().min(0).default(5),
 				downscaleFps: z.number().min(1).default(5),
+				indexConcurrency: z.number().min(1).max(16).default(3),
 			})
 		)
 		.mutation(({ ctx, input }) =>
@@ -100,6 +101,7 @@ export const indexerRouter = router({
 							chunkDuration: input.chunkDuration,
 							chunkOverlap: input.chunkOverlap,
 							downscaleFps: input.downscaleFps,
+							indexConcurrency: input.indexConcurrency,
 						})
 					);
 
@@ -122,6 +124,7 @@ export const indexerRouter = router({
 				chunkDuration: z.number().min(1).optional(),
 				chunkOverlap: z.number().min(0).optional(),
 				downscaleFps: z.number().min(1).optional(),
+				indexConcurrency: z.number().min(1).max(16).optional(),
 			})
 		)
 		.mutation(({ ctx, input }) =>

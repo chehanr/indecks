@@ -16,6 +16,7 @@ export const library = sqliteTable(
 			.default("idle")
 			.notNull(),
 		videoCount: integer("video_count").default(0).notNull(),
+		scanConcurrency: integer("scan_concurrency").default(3).notNull(),
 		createdAt: integer("created_at", { mode: "timestamp_ms" })
 			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
 			.notNull(),
