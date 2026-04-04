@@ -1,6 +1,3 @@
-import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
-
 import { FileSystem } from "@effect/platform";
 import type { Db } from "@indecks/db";
 import { chunk as chunkTable } from "@indecks/db/schema/chunk";
@@ -42,17 +39,9 @@ const makeChunkId = (
 	startTime: number
 ): string => {
 	const raw = `${videoId}:${indexerId}:${startTime}`;
-	return createHash("sha256").update(raw).digest("hex").slice(0, 16);
+	const hash = Bun.SHA256.hash(raw, "hex") as string;
+	return hash.slice(0, 16);
 };
-
-const hashFile = (filePath: string): Effect.Effect<string> =>
-	Effect.async<string>((resume) => {
-		const hash = createHash("sha256");
-		const stream = createReadStream(filePath);
-		stream.on("data", (chunk) => hash.update(chunk));
-		stream.on("end", () => resume(Effect.succeed(hash.digest("hex"))));
-		stream.on("error", () => resume(Effect.succeed("")));
-	});
 
 export interface ProcessorServiceShape {
 	readonly indexLibrary: (
@@ -99,8 +88,8 @@ export const ProcessorServiceLive = Layer.effect(
 		const fs = yield* FileSystem.FileSystem;
 
 		interface ExistingVideo {
-			fileHash: string | null;
 			filePath: string;
+			fileSize: number | null;
 			id: string;
 		}
 
@@ -111,21 +100,23 @@ export const ProcessorServiceLive = Layer.effect(
 			Effect.gen(function* () {
 				let changed = 0;
 				for (const vid of videos) {
-					const currentHash = yield* hashFile(vid.filePath);
-					if (vid.fileHash && vid.fileHash !== currentHash) {
+					const fileStat = yield* fs.stat(vid.filePath).pipe(Effect.option);
+					if (fileStat._tag === "None") {
+						continue;
+					}
+					const currentSize = Number(fileStat.value.size);
+					if (vid.fileSize !== null && vid.fileSize !== currentSize) {
 						yield* Effect.promise(() =>
 							db.delete(chunkTable).where(eq(chunkTable.videoId, vid.id))
 						);
 						const duration = yield* ffmpeg
 							.getVideoDuration(vid.filePath)
 							.pipe(Effect.option);
-						const fileStat = yield* fs.stat(vid.filePath).pipe(Effect.orDie);
 						yield* Effect.promise(() =>
 							db
 								.update(videoTable)
 								.set({
-									fileHash: currentHash,
-									fileSize: Number(fileStat.size),
+									fileSize: currentSize,
 									duration: duration._tag === "Some" ? duration.value : null,
 									status: "pending",
 									errorMessage: null,
@@ -133,13 +124,6 @@ export const ProcessorServiceLive = Layer.effect(
 								.where(eq(videoTable.id, vid.id))
 						);
 						changed++;
-					} else if (!vid.fileHash) {
-						yield* Effect.promise(() =>
-							db
-								.update(videoTable)
-								.set({ fileHash: currentHash })
-								.where(eq(videoTable.id, vid.id))
-						);
 					}
 				}
 				return changed;
@@ -156,7 +140,6 @@ export const ProcessorServiceLive = Layer.effect(
 				for (const filePath of newPaths) {
 					const fileName = filePath.split("/").pop() ?? filePath;
 					const fileStat = yield* fs.stat(filePath).pipe(Effect.orDie);
-					const fileHash = yield* hashFile(filePath);
 					const duration = yield* ffmpeg
 						.getVideoDuration(filePath)
 						.pipe(Effect.option);
@@ -168,7 +151,6 @@ export const ProcessorServiceLive = Layer.effect(
 							filePath,
 							fileName,
 							fileSize: Number(fileStat.size),
-							fileHash,
 							duration: duration._tag === "Some" ? duration.value : null,
 							status: "pending",
 						})
@@ -219,7 +201,7 @@ export const ProcessorServiceLive = Layer.effect(
 						.select({
 							id: videoTable.id,
 							filePath: videoTable.filePath,
-							fileHash: videoTable.fileHash,
+							fileSize: videoTable.fileSize,
 						})
 						.from(videoTable)
 						.where(eq(videoTable.libraryId, libraryId))

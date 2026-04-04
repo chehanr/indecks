@@ -26,7 +26,6 @@ export const video = sqliteTable(
 		})
 			.default("pending")
 			.notNull(),
-		fileHash: text("file_hash"),
 		errorMessage: text("error_message"),
 		createdAt: integer("created_at", { mode: "timestamp_ms" })
 			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)

@@ -15,6 +15,13 @@
       "when": 1775280264771,
       "tag": "0001_left_the_stranger",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1775291960712,
+      "tag": "0002_stale_wallow",
+      "breakpoints": true
     }
   ]
 }
