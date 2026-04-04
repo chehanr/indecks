@@ -220,7 +220,7 @@ export const ProcessorServiceLive = Layer.effect(
 								);
 							}
 						}),
-					{ concurrency: 5 }
+					{ concurrency: 3 }
 				);
 
 				return {
