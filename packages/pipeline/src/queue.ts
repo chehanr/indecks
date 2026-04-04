@@ -5,7 +5,7 @@ import { library as libraryTable } from "@indecks/db/schema/library";
 import { video as videoTable } from "@indecks/db/schema/video";
 import type { VectorDbManagerShape } from "@indecks/vector";
 import { and, eq, inArray, or } from "drizzle-orm";
-import { Context, Effect, type Fiber, Layer, Schedule } from "effect";
+import { Context, Effect, Layer, Schedule } from "effect";
 import { nanoid } from "nanoid";
 
 import {
@@ -147,7 +147,7 @@ export interface JobQueueServiceShape {
 	readonly startWorker: (
 		db: Db,
 		vectorDbManager: VectorDbManagerShape
-	) => Effect.Effect<Fiber.RuntimeFiber<void>>;
+	) => Effect.Effect<void>;
 }
 
 export class JobQueueService extends Context.Tag("JobQueueService")<
@@ -488,12 +488,11 @@ export const JobQueueServiceLive = Layer.effect(
 						}
 					});
 
-					return yield* pollOnce.pipe(
+					yield* pollOnce.pipe(
 						Effect.catchAll(() => Effect.void),
 						Effect.catchAllDefect(() => Effect.void),
 						Effect.repeat(Schedule.spaced("3 seconds")),
-						Effect.asVoid,
-						Effect.forkDaemon
+						Effect.asVoid
 					);
 				}),
 		};

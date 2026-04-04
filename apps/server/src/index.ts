@@ -82,18 +82,24 @@ setJobProgressCallback(
 	}
 );
 
-const workerFiber = await appRuntime.runPromise(
+await appRuntime.runPromise(
 	Effect.gen(function* () {
 		const jobQueue = yield* JobQueueService;
 		const db = yield* DbService;
-		const vectorDbManager = yield* VectorDbManagerService;
 
 		const recovered = yield* jobQueue.recoverStaleJobs(db);
 		if (recovered > 0) {
 			console.info(`Recovered ${recovered} stale jobs`);
 		}
+	})
+);
 
-		return yield* jobQueue.startWorker(db, vectorDbManager);
+const workerFiber = appRuntime.runFork(
+	Effect.gen(function* () {
+		const jobQueue = yield* JobQueueService;
+		const db = yield* DbService;
+		const vectorDbManager = yield* VectorDbManagerService;
+		yield* jobQueue.startWorker(db, vectorDbManager);
 	})
 );
 
