@@ -114,9 +114,19 @@ const getVideoDuration = (
 			filePath,
 		]);
 		const info = JSON.parse(stdout) as {
-			format: { duration: string };
+			format?: { duration?: string };
 		};
-		return Number.parseFloat(info.format.duration);
+		const raw = info.format?.duration;
+		if (raw === undefined) {
+			return yield* Effect.fail(
+				new FFmpegError({
+					command: `ffprobe ${filePath}`,
+					exitCode: -1,
+					stderr: "No duration in format info",
+				})
+			);
+		}
+		return Number.parseFloat(raw);
 	});
 
 export interface FFmpegServiceShape {
