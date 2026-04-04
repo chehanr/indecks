@@ -493,10 +493,18 @@ export const JobQueueServiceLive = Layer.effect(
 					});
 
 					const workerLoop = Effect.gen(function* () {
+						console.info("[worker] started");
 						while (true) {
 							yield* processAvailable.pipe(
-								Effect.catchAll(() => Effect.void),
-								Effect.catchAllDefect(() => Effect.void)
+								Effect.tap(() =>
+									Effect.sync(() => console.info("[worker] processed batch"))
+								),
+								Effect.catchAll((err) =>
+									Effect.sync(() => console.error("[worker] error:", err))
+								),
+								Effect.catchAllDefect((err) =>
+									Effect.sync(() => console.error("[worker] defect:", err))
+								)
 							);
 							// Wait for a signal or poll every 30s as fallback
 							yield* Queue.take(notifyQueue).pipe(
