@@ -5,6 +5,7 @@ import { DbServiceLive } from "@indecks/db";
 import { ServerConfigLive } from "@indecks/env/server";
 import { EmbedServiceLive } from "@indecks/pipeline/embedder";
 import { FFmpegServiceLive } from "@indecks/pipeline/ffmpeg";
+import { JobNotifyServiceLive } from "@indecks/pipeline/notify";
 import { ProcessorServiceLive } from "@indecks/pipeline/processor";
 import { JobQueueServiceLive } from "@indecks/pipeline/queue";
 import { VectorDbManagerServiceLive } from "@indecks/vector";
@@ -32,6 +33,7 @@ export const makeAppLayer = (vectorDbDir: string) => {
 			Layer.mergeAll(DbLayer, EmbedLayer, FFmpegLayer, PlatformLayer)
 		)
 	);
+	const JobNotifyLayer = JobNotifyServiceLive;
 	const JobQueueLayer = JobQueueServiceLive.pipe(Layer.provide(ProcessorLayer));
 
 	return Layer.mergeAll(
@@ -43,6 +45,7 @@ export const makeAppLayer = (vectorDbDir: string) => {
 		EmbedLayer,
 		FFmpegLayer,
 		ProcessorLayer,
+		JobNotifyLayer,
 		JobQueueLayer
 	);
 };

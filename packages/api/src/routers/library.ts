@@ -11,6 +11,7 @@ import {
 	LibraryNotFoundError,
 	VideoNotFoundError,
 } from "@indecks/pipeline/errors";
+import { notifyNewJob } from "@indecks/pipeline/notify";
 import { VectorDbManagerService } from "@indecks/vector";
 import { and, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
@@ -237,6 +238,7 @@ export const libraryRouter = router({
 							status: "pending",
 						})
 					);
+					yield* notifyNewJob;
 
 					return { jobId };
 				})
@@ -330,6 +332,7 @@ export const libraryRouter = router({
 							status: "pending",
 						})
 					);
+					yield* notifyNewJob;
 
 					return { jobId };
 				})

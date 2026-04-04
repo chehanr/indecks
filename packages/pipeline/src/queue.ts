@@ -5,7 +5,7 @@ import { library as libraryTable } from "@indecks/db/schema/library";
 import { video as videoTable } from "@indecks/db/schema/video";
 import type { VectorDbManagerShape } from "@indecks/vector";
 import { and, eq, inArray, or } from "drizzle-orm";
-import { Context, Effect, type Fiber, Layer, Schedule } from "effect";
+import { Context, Duration, Effect, type Fiber, Layer, Queue } from "effect";
 import { nanoid } from "nanoid";
 
 import {
@@ -13,6 +13,7 @@ import {
 	JobMissingFieldError,
 	UnknownJobTypeError,
 } from "./errors";
+import { JobNotifyService } from "./notify";
 import { ProcessorService } from "./processor";
 
 export type JobProgressCallback = (
@@ -146,9 +147,8 @@ export interface JobQueueServiceShape {
 	readonly recoverStaleJobs: (db: Db) => Effect.Effect<number>;
 	readonly startWorker: (
 		db: Db,
-		vectorDbManager: VectorDbManagerShape,
-		pollInterval?: number
-	) => Effect.Effect<Fiber.RuntimeFiber<void>>;
+		vectorDbManager: VectorDbManagerShape
+	) => Effect.Effect<Fiber.RuntimeFiber<void>, never, JobNotifyService>;
 }
 
 export class JobQueueService extends Context.Tag("JobQueueService")<
@@ -258,243 +258,259 @@ export const JobQueueServiceLive = Layer.effect(
 					return result.rowsAffected;
 				}).pipe(Effect.catchAll(() => Effect.succeed(0))),
 
-			startWorker: (db, vectorDbManager, pollInterval = 3000) => {
-				const onProgress =
-					(jobId: string): ProgressFn =>
-					(progressVal, message) =>
-						updateJobProgress(db, jobId, progressVal, message);
+			startWorker: (db, vectorDbManager) =>
+				Effect.gen(function* () {
+					const onProgress =
+						(jobId: string): ProgressFn =>
+						(progressVal, message) =>
+							updateJobProgress(db, jobId, progressVal, message);
 
-				const handleScanLibrary = (jobRow: typeof jobTable.$inferSelect) =>
-					Effect.gen(function* () {
-						if (!jobRow.libraryId) {
-							return yield* new JobMissingFieldError({
-								jobType: "scan_library",
-								field: "libraryId",
-							});
-						}
-						yield* processor.scanLibraryFolder(
-							db,
-							jobRow.libraryId,
-							onProgress(jobRow.id)
-						);
-					});
-
-				const handleIndexVideo = (jobRow: typeof jobTable.$inferSelect) =>
-					Effect.gen(function* () {
-						if (!jobRow.videoId) {
-							return yield* new JobMissingFieldError({
-								jobType: "index_video",
-								field: "videoId",
-							});
-						}
-						if (!jobRow.indexerId) {
-							return yield* new JobMissingFieldError({
-								jobType: "index_video",
-								field: "indexerId",
-							});
-						}
-						const libraryId = yield* resolveLibraryId(db, jobRow);
-						if (!libraryId) {
-							return yield* new JobMissingFieldError({
-								jobType: "index_video",
-								field: "libraryId",
-							});
-						}
-						yield* processor.processVideo(
-							db,
-							jobRow.videoId,
-							jobRow.indexerId,
-							vectorDbManager,
-							jobRow.id,
-							onProgress(jobRow.id)
-						);
-					});
-
-				const handleIndexLibrary = (jobRow: typeof jobTable.$inferSelect) =>
-					Effect.gen(function* () {
-						if (!jobRow.libraryId) {
-							return yield* new JobMissingFieldError({
-								jobType: "index_library",
-								field: "libraryId",
-							});
-						}
-						if (!jobRow.indexerId) {
-							return yield* new JobMissingFieldError({
-								jobType: "index_library",
-								field: "indexerId",
-							});
-						}
-						yield* processor.indexLibrary(
-							db,
-							vectorDbManager,
-							jobRow.libraryId,
-							jobRow.indexerId,
-							jobRow.id,
-							onProgress(jobRow.id)
-						);
-					});
-
-				const processJob = (jobRow: typeof jobTable.$inferSelect) =>
-					Effect.gen(function* () {
-						switch (jobRow.type) {
-							case "scan_library":
-								yield* handleScanLibrary(jobRow);
-								break;
-							case "index_video":
-								yield* handleIndexVideo(jobRow);
-								break;
-							case "index_library":
-								yield* handleIndexLibrary(jobRow);
-								break;
-							default:
-								return yield* new UnknownJobTypeError({
-									jobType: jobRow.type,
+					const handleScanLibrary = (jobRow: typeof jobTable.$inferSelect) =>
+						Effect.gen(function* () {
+							if (!jobRow.libraryId) {
+								return yield* new JobMissingFieldError({
+									jobType: "scan_library",
+									field: "libraryId",
 								});
-						}
-					});
-
-				const formatErrorMessage = (err: unknown): string => {
-					if (err instanceof Error) {
-						return err.message;
-					}
-					if (typeof err === "object" && err !== null && "_tag" in err) {
-						return (err as { _tag: string })._tag;
-					}
-					return String(err);
-				};
-
-				const MAX_RETRIES = 3;
-
-				const resetVideoStatuses = (
-					jobRow: typeof jobTable.$inferSelect,
-					errorMsg: string
-				) =>
-					Effect.gen(function* () {
-						if (jobRow.videoId && jobRow.type === "index_video") {
-							yield* Effect.promise(() =>
-								db
-									.update(videoTable)
-									.set({ status: "error", errorMessage: errorMsg })
-									.where(eq(videoTable.id, jobRow.videoId as string))
-							).pipe(Effect.ignore);
-						}
-						if (jobRow.libraryId && jobRow.type === "index_library") {
-							yield* Effect.promise(() =>
-								db
-									.update(videoTable)
-									.set({ status: "pending", errorMessage: null })
-									.where(
-										and(
-											eq(videoTable.libraryId, jobRow.libraryId as string),
-											eq(videoTable.status, "processing")
-										)
-									)
-							).pipe(Effect.ignore);
-						}
-					});
-
-				const failJobWithError = (
-					jobRow: typeof jobTable.$inferSelect,
-					err: unknown
-				) =>
-					Effect.gen(function* () {
-						const msg = formatErrorMessage(err);
-
-						if (jobRow.retryCount < MAX_RETRIES) {
-							yield* Effect.promise(() =>
-								db
-									.update(jobTable)
-									.set({
-										status: "pending",
-										retryCount: jobRow.retryCount + 1,
-										progressMessage: `Retry ${jobRow.retryCount + 1}/${MAX_RETRIES}: ${msg}`,
-									})
-									.where(eq(jobTable.id, jobRow.id))
+							}
+							yield* processor.scanLibraryFolder(
+								db,
+								jobRow.libraryId,
+								onProgress(jobRow.id)
 							);
+						});
+
+					const handleIndexVideo = (jobRow: typeof jobTable.$inferSelect) =>
+						Effect.gen(function* () {
+							if (!jobRow.videoId) {
+								return yield* new JobMissingFieldError({
+									jobType: "index_video",
+									field: "videoId",
+								});
+							}
+							if (!jobRow.indexerId) {
+								return yield* new JobMissingFieldError({
+									jobType: "index_video",
+									field: "indexerId",
+								});
+							}
+							const libraryId = yield* resolveLibraryId(db, jobRow);
+							if (!libraryId) {
+								return yield* new JobMissingFieldError({
+									jobType: "index_video",
+									field: "libraryId",
+								});
+							}
+							yield* processor.processVideo(
+								db,
+								jobRow.videoId,
+								jobRow.indexerId,
+								vectorDbManager,
+								jobRow.id,
+								onProgress(jobRow.id)
+							);
+						});
+
+					const handleIndexLibrary = (jobRow: typeof jobTable.$inferSelect) =>
+						Effect.gen(function* () {
+							if (!jobRow.libraryId) {
+								return yield* new JobMissingFieldError({
+									jobType: "index_library",
+									field: "libraryId",
+								});
+							}
+							if (!jobRow.indexerId) {
+								return yield* new JobMissingFieldError({
+									jobType: "index_library",
+									field: "indexerId",
+								});
+							}
+							yield* processor.indexLibrary(
+								db,
+								vectorDbManager,
+								jobRow.libraryId,
+								jobRow.indexerId,
+								jobRow.id,
+								onProgress(jobRow.id)
+							);
+						});
+
+					const processJob = (jobRow: typeof jobTable.$inferSelect) =>
+						Effect.gen(function* () {
+							switch (jobRow.type) {
+								case "scan_library":
+									yield* handleScanLibrary(jobRow);
+									break;
+								case "index_video":
+									yield* handleIndexVideo(jobRow);
+									break;
+								case "index_library":
+									yield* handleIndexLibrary(jobRow);
+									break;
+								default:
+									return yield* new UnknownJobTypeError({
+										jobType: jobRow.type,
+									});
+							}
+						});
+
+					const formatErrorMessage = (err: unknown): string => {
+						if (err instanceof Error) {
+							return err.message;
+						}
+						if (typeof err === "object" && err !== null && "_tag" in err) {
+							return (err as { _tag: string })._tag;
+						}
+						return String(err);
+					};
+
+					const MAX_RETRIES = 3;
+
+					const resetVideoStatuses = (
+						jobRow: typeof jobTable.$inferSelect,
+						errorMsg: string
+					) =>
+						Effect.gen(function* () {
+							if (jobRow.videoId && jobRow.type === "index_video") {
+								yield* Effect.promise(() =>
+									db
+										.update(videoTable)
+										.set({ status: "error", errorMessage: errorMsg })
+										.where(eq(videoTable.id, jobRow.videoId as string))
+								).pipe(Effect.ignore);
+							}
+							if (jobRow.libraryId && jobRow.type === "index_library") {
+								yield* Effect.promise(() =>
+									db
+										.update(videoTable)
+										.set({ status: "pending", errorMessage: null })
+										.where(
+											and(
+												eq(videoTable.libraryId, jobRow.libraryId as string),
+												eq(videoTable.status, "processing")
+											)
+										)
+								).pipe(Effect.ignore);
+							}
+						});
+
+					const failJobWithError = (
+						jobRow: typeof jobTable.$inferSelect,
+						err: unknown
+					) =>
+						Effect.gen(function* () {
+							const msg = formatErrorMessage(err);
+
+							if (jobRow.retryCount < MAX_RETRIES) {
+								yield* Effect.promise(() =>
+									db
+										.update(jobTable)
+										.set({
+											status: "pending",
+											retryCount: jobRow.retryCount + 1,
+											progressMessage: `Retry ${jobRow.retryCount + 1}/${MAX_RETRIES}: ${msg}`,
+										})
+										.where(eq(jobTable.id, jobRow.id))
+								);
+								yield* resetVideoStatuses(jobRow, msg);
+								yield* Effect.sync(() =>
+									onJobProgress?.(
+										jobRow.id,
+										"pending",
+										0,
+										`Retrying (${jobRow.retryCount + 1}/${MAX_RETRIES})...`,
+										null
+									)
+								);
+								return;
+							}
+
+							yield* failJob(db, jobRow.id, msg);
 							yield* resetVideoStatuses(jobRow, msg);
-							yield* Effect.sync(() =>
-								onJobProgress?.(
-									jobRow.id,
-									"pending",
-									0,
-									`Retrying (${jobRow.retryCount + 1}/${MAX_RETRIES})...`,
-									null
-								)
-							);
-							return;
-						}
 
-						yield* failJob(db, jobRow.id, msg);
-						yield* resetVideoStatuses(jobRow, msg);
+							if (jobRow.libraryId) {
+								yield* Effect.promise(() =>
+									db
+										.update(libraryTable)
+										.set({ status: "error" })
+										.where(eq(libraryTable.id, jobRow.libraryId as string))
+								).pipe(Effect.ignore);
+							}
+						});
 
-						if (jobRow.libraryId) {
-							yield* Effect.promise(() =>
-								db
-									.update(libraryTable)
-									.set({ status: "error" })
-									.where(eq(libraryTable.id, jobRow.libraryId as string))
-							).pipe(Effect.ignore);
-						}
-					});
-
-				const handleCancellation = (jobRow: typeof jobTable.$inferSelect) =>
-					Effect.gen(function* () {
-						yield* failJob(db, jobRow.id, "Job cancelled");
-						if (jobRow.videoId) {
-							yield* Effect.promise(() =>
-								db
-									.update(videoTable)
-									.set({ status: "pending", errorMessage: null })
-									.where(eq(videoTable.id, jobRow.videoId as string))
-							).pipe(Effect.ignore);
-						}
-						if (jobRow.libraryId) {
-							yield* Effect.promise(() =>
-								db
-									.update(videoTable)
-									.set({ status: "pending", errorMessage: null })
-									.where(
-										and(
-											eq(videoTable.libraryId, jobRow.libraryId as string),
-											eq(videoTable.status, "processing")
+					const handleCancellation = (jobRow: typeof jobTable.$inferSelect) =>
+						Effect.gen(function* () {
+							yield* failJob(db, jobRow.id, "Job cancelled");
+							if (jobRow.videoId) {
+								yield* Effect.promise(() =>
+									db
+										.update(videoTable)
+										.set({ status: "pending", errorMessage: null })
+										.where(eq(videoTable.id, jobRow.videoId as string))
+								).pipe(Effect.ignore);
+							}
+							if (jobRow.libraryId) {
+								yield* Effect.promise(() =>
+									db
+										.update(videoTable)
+										.set({ status: "pending", errorMessage: null })
+										.where(
+											and(
+												eq(videoTable.libraryId, jobRow.libraryId as string),
+												eq(videoTable.status, "processing")
+											)
 										)
-									)
-							).pipe(Effect.ignore);
-							yield* Effect.promise(() =>
-								db
-									.update(libraryTable)
-									.set({ status: "idle" })
-									.where(eq(libraryTable.id, jobRow.libraryId as string))
-							).pipe(Effect.ignore);
+								).pipe(Effect.ignore);
+								yield* Effect.promise(() =>
+									db
+										.update(libraryTable)
+										.set({ status: "idle" })
+										.where(eq(libraryTable.id, jobRow.libraryId as string))
+								).pipe(Effect.ignore);
+							}
+						});
+
+					const runJob = (jobRow: typeof jobTable.$inferSelect) =>
+						processJob(jobRow).pipe(
+							Effect.tap(() => completeJob(db, jobRow.id)),
+							Effect.catchIf(
+								(err): err is JobCancelledError =>
+									err instanceof JobCancelledError,
+								() => handleCancellation(jobRow)
+							),
+							Effect.catchAll((err) => failJobWithError(jobRow, err)),
+							Effect.catchAllDefect((err) => failJobWithError(jobRow, err))
+						);
+
+					const notifyQueue = yield* JobNotifyService;
+
+					const processAvailable = Effect.gen(function* () {
+						let jobRow = yield* claimNextJob(db);
+						while (jobRow) {
+							yield* runJob(jobRow);
+							jobRow = yield* claimNextJob(db);
 						}
 					});
 
-				const runJob = (jobRow: typeof jobTable.$inferSelect) =>
-					processJob(jobRow).pipe(
-						Effect.tap(() => completeJob(db, jobRow.id)),
-						Effect.catchIf(
-							(err): err is JobCancelledError =>
-								err instanceof JobCancelledError,
-							() => handleCancellation(jobRow)
-						),
-						Effect.catchAll((err) => failJobWithError(jobRow, err)),
-						Effect.catchAllDefect((err) => failJobWithError(jobRow, err))
+					const workerLoop = Effect.gen(function* () {
+						while (true) {
+							yield* processAvailable;
+							// Wait for a signal or poll every 30s as fallback
+							yield* Queue.take(notifyQueue).pipe(
+								Effect.timeout(Duration.seconds(30)),
+								Effect.ignore
+							);
+							// Drain any queued signals to avoid redundant loops
+							yield* Queue.takeAll(notifyQueue).pipe(Effect.ignore);
+						}
+					});
+
+					return yield* workerLoop.pipe(
+						Effect.catchAll(() => Effect.void),
+						Effect.asVoid,
+						Effect.forkDaemon
 					);
-
-				const pollOnce = Effect.gen(function* () {
-					const jobRow = yield* claimNextJob(db);
-					if (jobRow) {
-						yield* runJob(jobRow);
-					}
-				});
-
-				return pollOnce.pipe(
-					Effect.repeat(Schedule.spaced(`${pollInterval} millis`)),
-					Effect.catchAll(() => Effect.void),
-					Effect.asVoid,
-					Effect.forkDaemon
-				);
-			},
+				}),
 		};
 	})
 );
