@@ -21,8 +21,8 @@ export const indexer = sqliteTable(
 			.default(false)
 			.notNull(),
 		chunkDuration: integer("chunk_duration").default(30).notNull(),
-		chunkOverlap: integer("chunk_overlap").default(5).notNull(),
-		downscaleFps: integer("downscale_fps").default(5).notNull(),
+		chunkOverlap: integer("chunk_overlap").default(0).notNull(),
+		downscaleFps: integer("downscale_fps").default(2).notNull(),
 		indexConcurrency: integer("index_concurrency").default(3).notNull(),
 		createdAt: integer("created_at", { mode: "timestamp_ms" })
 			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)

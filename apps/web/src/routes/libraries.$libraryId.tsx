@@ -503,7 +503,7 @@ function IndexerFormFields({
 					id={`${idPrefix}-downscaleFps`}
 					min={1}
 					onChange={(e) =>
-						onChange("downscaleFps", Number.parseInt(e.target.value, 10) || 5)
+						onChange("downscaleFps", Number.parseInt(e.target.value, 10) || 2)
 					}
 					type="number"
 					value={values.downscaleFps}
@@ -551,8 +551,8 @@ function useIndexerFormState(initial?: {
 		dimensions: initial?.dimensions ?? 768,
 		instruction: initial?.instruction ?? "",
 		chunkDuration: initial?.chunkDuration ?? 30,
-		chunkOverlap: initial?.chunkOverlap ?? 5,
-		downscaleFps: initial?.downscaleFps ?? 5,
+		chunkOverlap: initial?.chunkOverlap ?? 0,
+		downscaleFps: initial?.downscaleFps ?? 2,
 		indexConcurrency: initial?.indexConcurrency ?? 3,
 	});
 

@@ -66,8 +66,8 @@ export const indexerRouter = router({
 				instruction: z.string().trim().optional(),
 				isDefault: z.boolean().default(false),
 				chunkDuration: z.number().min(1).default(30),
-				chunkOverlap: z.number().min(0).default(5),
-				downscaleFps: z.number().min(1).default(5),
+				chunkOverlap: z.number().min(0).default(0),
+				downscaleFps: z.number().min(1).default(2),
 				indexConcurrency: z.number().min(1).max(16).default(3),
 			})
 		)
