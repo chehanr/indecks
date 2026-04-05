@@ -996,20 +996,33 @@ interface SearchResult {
 function VideoPlayer({
 	filePath,
 	startTime,
+	endTime,
 }: {
+	endTime: number;
 	filePath: string;
 	startTime: number;
 }) {
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const serverUrl = import.meta.env.VITE_SERVER_URL as string;
-	const src = `${serverUrl}/api/video?path=${encodeURIComponent(filePath)}#t=${startTime}`;
+	const src = `${serverUrl}/api/video?path=${encodeURIComponent(filePath)}&start=${startTime}&end=${endTime}`;
+
+	useEffect(() => {
+		return () => {
+			const video = videoRef.current;
+			if (video) {
+				video.pause();
+				video.removeAttribute("src");
+				video.load();
+			}
+		};
+	}, []);
 
 	return (
 		<video
 			className="w-full rounded-md"
 			controls
 			muted
-			preload="metadata"
+			preload="none"
 			ref={videoRef}
 			src={src}
 		/>
@@ -1045,6 +1058,7 @@ function SearchResultCard({ result }: { result: SearchResult }) {
 			{showPlayer && (
 				<div className="mt-2">
 					<VideoPlayer
+						endTime={result.endTime}
 						filePath={result.filePath}
 						startTime={result.startTime}
 					/>

@@ -1,6 +1,8 @@
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
+import { Readable } from "node:stream";
 
 import { trpcServer } from "@hono/trpc-server";
 import { createTrpcContext, makeAppLayer } from "@indecks/api/context";
@@ -176,6 +178,43 @@ app.get("/api/video", async (c) => {
 	const fileStat = await stat(absPath).catch(() => null);
 	if (!fileStat) {
 		return c.text("File not found", 404);
+	}
+
+	const startTime = c.req.query("start");
+	const endTime = c.req.query("end");
+
+	if (startTime !== undefined && endTime !== undefined) {
+		const ss = Number.parseFloat(startTime);
+		const to = Number.parseFloat(endTime);
+		if (Number.isNaN(ss) || Number.isNaN(to) || ss < 0 || to <= ss) {
+			return c.text("Invalid start/end parameters", 400);
+		}
+
+		const ffmpeg = spawn("ffmpeg", [
+			"-ss",
+			String(ss),
+			"-to",
+			String(to),
+			"-i",
+			absPath,
+			"-c",
+			"copy",
+			"-movflags",
+			"frag_keyframe+empty_moov",
+			"-f",
+			"mp4",
+			"pipe:1",
+		]);
+
+		const stream = Readable.toWeb(ffmpeg.stdout) as ReadableStream;
+		ffmpeg.stderr.resume();
+
+		return new Response(stream, {
+			headers: {
+				"Content-Type": "video/mp4",
+				"Cache-Control": "public, max-age=86400",
+			},
+		});
 	}
 
 	const fileSize = fileStat.size;
