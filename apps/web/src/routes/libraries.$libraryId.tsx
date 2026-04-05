@@ -1057,11 +1057,11 @@ function SearchResultCard({ result }: { result: SearchResult }) {
 function SearchTab({ libraryId }: { libraryId: string }) {
 	const [searchQuery, setSearchQuery] = useQueryState(
 		"q",
-		parseAsString.withDefault("").withOptions({ history: "replace" })
+		parseAsString.withDefault("")
 	);
 	const [indexerId, setIndexerId] = useQueryState(
 		"indexer",
-		parseAsString.withDefault("").withOptions({ history: "replace" })
+		parseAsString.withDefault("")
 	);
 	const [inputValue, setInputValue] = useState(searchQuery);
 
@@ -1305,7 +1305,7 @@ function LibraryDetailPage() {
 	const navigate = useNavigate();
 	const [tab, setTab] = useQueryState(
 		"tab",
-		parseAsString.withDefault("videos").withOptions({ history: "replace" })
+		parseAsString.withDefault("videos")
 	);
 
 	const libraryQuery = useQuery(
