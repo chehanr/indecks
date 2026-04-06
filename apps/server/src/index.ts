@@ -203,6 +203,7 @@ function generateThumbnail(
 
 	const promise = new Promise<number | null>((res) => {
 		const proc = spawn("ffmpeg", [
+			"-nostdin",
 			"-ss",
 			String(seconds),
 			"-i",
@@ -216,6 +217,7 @@ function generateThumbnail(
 			"-y",
 			thumbPath,
 		]);
+		proc.stdout.resume();
 		proc.stderr.resume();
 		proc.on("close", res);
 	}).finally(() => {

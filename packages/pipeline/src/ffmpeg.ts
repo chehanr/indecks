@@ -88,7 +88,8 @@ const runString = (
 const runExitCode = (
 	executor: CommandExecutor.CommandExecutor,
 	cmd: string,
-	args: string[]
+	args: string[],
+	timeout: Duration.Duration = CMD_TIMEOUT
 ): Effect.Effect<void, FFmpegError> =>
 	Command.make(cmd, ...args).pipe(
 		Command.exitCode,
@@ -105,7 +106,7 @@ const runExitCode = (
 					)
 		),
 		Effect.timeoutFail({
-			duration: CMD_TIMEOUT,
+			duration: timeout,
 			onTimeout: () =>
 				new FFmpegError({
 					command: `${cmd} ${args.join(" ")}`,
@@ -197,6 +198,55 @@ export class FFmpegService extends Context.Tag("FFmpegService")<
 	FFmpegServiceShape
 >() {}
 
+const computeChunkSpecs = (
+	duration: number,
+	chunkDuration: number,
+	overlap: number,
+	tmpDir: string
+): Array<{
+	chunkPath: string;
+	endTime: number;
+	startTime: number;
+	t: number;
+}> => {
+	const step = chunkDuration - overlap;
+	const specs: Array<{
+		chunkPath: string;
+		endTime: number;
+		startTime: number;
+		t: number;
+	}> = [];
+
+	if (duration <= chunkDuration) {
+		specs.push({
+			startTime: 0,
+			endTime: duration,
+			t: duration,
+			chunkPath: join(tmpDir, "chunk_000.mp4"),
+		});
+		return specs;
+	}
+
+	let start = 0;
+	let idx = 0;
+	while (start < duration) {
+		const end = Math.min(start + chunkDuration, duration);
+		specs.push({
+			startTime: start,
+			endTime: end,
+			t: end - start,
+			chunkPath: join(tmpDir, `chunk_${String(idx).padStart(3, "0")}.mp4`),
+		});
+		start += step;
+		idx++;
+		if (start + overlap >= duration) {
+			break;
+		}
+	}
+
+	return specs;
+};
+
 export const FFmpegServiceLive = Layer.effect(
 	FFmpegService,
 	Effect.gen(function* () {
@@ -242,8 +292,6 @@ export const FFmpegServiceLive = Layer.effect(
 							]
 						: ["-c", "copy"];
 
-					const step = chunkDuration - overlap;
-
 					const makeChunk = (start: number, t: number, chunkPath: string) =>
 						runExitCode(executor, "ffmpeg", [
 							"-y",
@@ -257,42 +305,12 @@ export const FFmpegServiceLive = Layer.effect(
 							chunkPath,
 						]);
 
-					// Precompute all chunk specs
-					const specs: Array<{
-						chunkPath: string;
-						endTime: number;
-						startTime: number;
-						t: number;
-					}> = [];
-
-					if (duration <= chunkDuration) {
-						specs.push({
-							startTime: 0,
-							endTime: duration,
-							t: duration,
-							chunkPath: join(tmpDir, "chunk_000.mp4"),
-						});
-					} else {
-						let start = 0;
-						let idx = 0;
-						while (start < duration) {
-							const end = Math.min(start + chunkDuration, duration);
-							specs.push({
-								startTime: start,
-								endTime: end,
-								t: end - start,
-								chunkPath: join(
-									tmpDir,
-									`chunk_${String(idx).padStart(3, "0")}.mp4`
-								),
-							});
-							start += step;
-							idx++;
-							if (start + overlap >= duration) {
-								break;
-							}
-						}
-					}
+					const specs = computeChunkSpecs(
+						duration,
+						chunkDuration,
+						overlap,
+						tmpDir
+					);
 
 					// Run ffmpeg in parallel
 					yield* Effect.forEach(
@@ -316,6 +334,7 @@ export const FFmpegServiceLive = Layer.effect(
 						overlap = 5,
 						downscaleHeight,
 						downscaleFps,
+						concurrency: chunkConcurrency,
 					} = options;
 					const absPath = resolve(filePath);
 					const duration = yield* getVideoDuration(executor, absPath);
@@ -344,46 +363,13 @@ export const FFmpegServiceLive = Layer.effect(
 							]
 						: ["-c", "copy"];
 
-					const step = chunkDuration - overlap;
+					const specs = computeChunkSpecs(
+						duration,
+						chunkDuration,
+						overlap,
+						tmpDir
+					);
 
-					// Precompute chunk specs to know total count upfront
-					const specs: Array<{
-						chunkPath: string;
-						endTime: number;
-						startTime: number;
-						t: number;
-					}> = [];
-
-					if (duration <= chunkDuration) {
-						specs.push({
-							startTime: 0,
-							endTime: duration,
-							t: duration,
-							chunkPath: join(tmpDir, "chunk_000.mp4"),
-						});
-					} else {
-						let start = 0;
-						let idx = 0;
-						while (start < duration) {
-							const end = Math.min(start + chunkDuration, duration);
-							specs.push({
-								startTime: start,
-								endTime: end,
-								t: end - start,
-								chunkPath: join(
-									tmpDir,
-									`chunk_${String(idx).padStart(3, "0")}.mp4`
-								),
-							});
-							start += step;
-							idx++;
-							if (start + overlap >= duration) {
-								break;
-							}
-						}
-					}
-
-					// Return total count and a produce effect that creates chunks sequentially
 					const produce = Effect.forEach(
 						specs,
 						(spec) =>
@@ -407,7 +393,7 @@ export const FFmpegServiceLive = Layer.effect(
 									})
 								)
 							),
-						{ discard: true }
+						{ concurrency: chunkConcurrency, discard: true }
 					);
 
 					return { total: specs.length, produce, tmpDir };

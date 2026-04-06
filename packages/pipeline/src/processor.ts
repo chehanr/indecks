@@ -501,6 +501,7 @@ export const ProcessorServiceLive = Layer.effect(
 						const videoBytes = yield* fs
 							.readFile(chunkInfo.chunkPath)
 							.pipe(Effect.orDie);
+						yield* fs.remove(chunkInfo.chunkPath).pipe(Effect.ignore);
 						const embedding = yield* embedSvc.embedVideo(
 							Buffer.from(videoBytes),
 							ctx.config,
