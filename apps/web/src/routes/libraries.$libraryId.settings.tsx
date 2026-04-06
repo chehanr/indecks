@@ -577,15 +577,17 @@ function IndexerCard({
 			</div>
 			<div className="ml-2 flex items-center gap-1">
 				<DropdownMenu>
-					<DropdownMenuTrigger>
-						<Button
-							disabled={indexMutation.isPending}
-							size="sm"
-							variant="outline"
-						>
-							Index
-						</Button>
-					</DropdownMenuTrigger>
+					<DropdownMenuTrigger
+						render={
+							<Button
+								disabled={indexMutation.isPending}
+								size="sm"
+								variant="outline"
+							>
+								Index
+							</Button>
+						}
+					/>
 					<DropdownMenuContent align="end">
 						<DropdownMenuItem onClick={() => indexMutation.mutate(false)}>
 							Index unindexed

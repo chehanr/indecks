@@ -23,7 +23,7 @@ export const searchRouter = router({
 				query: z.string().min(1),
 				libraryId: z.string().min(1),
 				indexerId: z.string().optional(),
-				limit: z.number().min(1).max(50).default(10),
+				limit: z.number().min(1).max(100).default(20),
 			})
 		)
 		.query(({ ctx, input }) =>

@@ -7,7 +7,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Pause, Play, Search, Volume2, VolumeOff } from "lucide-react";
-import { parseAsString, useQueryState } from "nuqs";
+import { parseAsInteger, parseAsString, useQueryState } from "nuqs";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDebouncedCallback } from "use-debounce";
 
@@ -259,6 +259,9 @@ function ResultCard({ result }: { result: SearchResult }) {
 
 // --- Search Page ---
 
+const PAGE_SIZE_OPTIONS = [12, 20, 40, 60] as const;
+const DEFAULT_PAGE_SIZE = 20;
+
 function SearchPage() {
 	const { libraryId } = Route.useParams();
 
@@ -270,12 +273,22 @@ function SearchPage() {
 		"indexer",
 		parseAsString.withDefault("")
 	);
+	const [pageSize, setPageSize] = useQueryState(
+		"size",
+		parseAsInteger.withDefault(DEFAULT_PAGE_SIZE)
+	);
 	const [inputValue, setInputValue] = useState(searchQuery);
 
 	const indexersQuery = useQuery(trpc.indexer.list.queryOptions({ libraryId }));
 
 	const defaultIndexer = indexersQuery.data?.find((e) => e.isDefault);
 	const selectedIndexerId = indexerId || defaultIndexer?.id || "";
+
+	const effectivePageSize = PAGE_SIZE_OPTIONS.includes(
+		pageSize as (typeof PAGE_SIZE_OPTIONS)[number]
+	)
+		? pageSize
+		: DEFAULT_PAGE_SIZE;
 
 	const debouncedSearch = useDebouncedCallback((value: string) => {
 		setSearchQuery(value.trim() || null);
@@ -286,12 +299,16 @@ function SearchPage() {
 		debouncedSearch(value);
 	};
 
+	const handlePageSizeChange = (size: number) => {
+		setPageSize(size === DEFAULT_PAGE_SIZE ? null : size);
+	};
+
 	const searchResults = useQuery({
 		...trpc.search.query.queryOptions({
 			query: searchQuery,
 			libraryId,
 			indexerId: selectedIndexerId || undefined,
-			limit: 20,
+			limit: effectivePageSize,
 		}),
 		enabled: searchQuery.length > 0 && selectedIndexerId.length > 0,
 	});
@@ -309,19 +326,35 @@ function SearchPage() {
 				/>
 			</div>
 
-			{indexersQuery.data && indexersQuery.data.length > 0 && (
+			<div className="flex items-center gap-3">
+				{indexersQuery.data && indexersQuery.data.length > 0 && (
+					<NativeSelect
+						className="flex-1"
+						onChange={(e) => setIndexerId(e.target.value || null)}
+						value={selectedIndexerId}
+					>
+						{indexersQuery.data.map((idx) => (
+							<NativeSelectOption key={idx.id} value={idx.id}>
+								{idx.name} ({idx.model}, {idx.dimensions}d)
+								{idx.isDefault ? " — default" : ""}
+							</NativeSelectOption>
+						))}
+					</NativeSelect>
+				)}
 				<NativeSelect
-					onChange={(e) => setIndexerId(e.target.value || null)}
-					value={selectedIndexerId}
+					className="w-auto"
+					onChange={(e) =>
+						handlePageSizeChange(Number.parseInt(e.target.value, 10))
+					}
+					value={effectivePageSize}
 				>
-					{indexersQuery.data.map((idx) => (
-						<NativeSelectOption key={idx.id} value={idx.id}>
-							{idx.name} ({idx.model}, {idx.dimensions}d)
-							{idx.isDefault ? " — default" : ""}
+					{PAGE_SIZE_OPTIONS.map((size) => (
+						<NativeSelectOption key={size} value={size}>
+							{size} results
 						</NativeSelectOption>
 					))}
 				</NativeSelect>
-			)}
+			</div>
 
 			{searchResults.data?.debug && (
 				<p className="font-mono text-muted-foreground text-xs">
