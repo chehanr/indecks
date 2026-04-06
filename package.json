@@ -37,11 +37,9 @@
     "check-types": "turbo check-types",
     "dev:web": "turbo -F web dev",
     "dev:server": "turbo -F server dev",
-    "db:push": "turbo -F @indecks/db db:push",
     "db:studio": "turbo -F @indecks/db db:studio",
     "db:generate": "turbo -F @indecks/db db:generate",
     "db:migrate": "turbo -F @indecks/db db:migrate",
-    "db:local": "turbo -F @indecks/db db:local",
     "check": "ultracite check",
     "fix": "ultracite fix"
   },
