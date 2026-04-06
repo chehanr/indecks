@@ -5,7 +5,7 @@ import {
 	NativeSelectOption,
 } from "@indecks/ui/components/native-select";
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { Pause, Play, Search, Volume2, VolumeOff } from "lucide-react";
 import { parseAsInteger, parseAsString, useQueryState } from "nuqs";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -246,12 +246,32 @@ function ResultCard({ result }: { result: SearchResult }) {
 			</div>
 			<div className="px-2 py-1.5">
 				<div className="flex items-center justify-between gap-1">
-					<p className="min-w-0 truncate text-xs">{result.fileName}</p>
+					<Link
+						className="min-w-0 truncate text-xs hover:underline"
+						params={{
+							libraryId: result.libraryId,
+							videoId: result.videoId,
+						}}
+						to="/libraries/$libraryId/videos/$videoId"
+					>
+						{result.fileName}
+					</Link>
 					<Badge variant="secondary">{(result.score * 100).toFixed(1)}%</Badge>
 				</div>
-				<p className="text-[10px] text-muted-foreground">
+				<Link
+					className="text-[10px] text-muted-foreground hover:underline"
+					params={{
+						libraryId: result.libraryId,
+						videoId: result.videoId,
+					}}
+					search={{
+						start: result.startTime,
+						end: result.endTime,
+					}}
+					to="/libraries/$libraryId/videos/$videoId"
+				>
 					{formatTime(result.startTime)} – {formatTime(result.endTime)}
-				</p>
+				</Link>
 			</div>
 		</div>
 	);

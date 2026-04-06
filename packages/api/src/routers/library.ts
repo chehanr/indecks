@@ -399,6 +399,28 @@ export const libraryRouter = router({
 			)
 		),
 
+	video: protectedProcedure
+		.input(z.object({ id: z.string() }))
+		.query(({ ctx, input }) =>
+			runEffect(
+				ctx.runtime,
+				Effect.gen(function* () {
+					const db = yield* DbService;
+					const row = yield* Effect.promise(() =>
+						db
+							.select()
+							.from(videoTable)
+							.where(eq(videoTable.id, input.id))
+							.get()
+					);
+					if (!row) {
+						return yield* new VideoNotFoundError({ videoId: input.id });
+					}
+					return row;
+				})
+			)
+		),
+
 	videos: protectedProcedure
 		.input(z.object({ libraryId: z.string() }))
 		.query(({ ctx, input }) =>

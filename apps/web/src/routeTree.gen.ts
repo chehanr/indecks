@@ -16,6 +16,8 @@ import { Route as LibrariesLibraryIdRouteImport } from './routes/libraries.$libr
 import { Route as LibrariesLibraryIdIndexRouteImport } from './routes/libraries.$libraryId.index'
 import { Route as LibrariesLibraryIdVideosRouteImport } from './routes/libraries.$libraryId.videos'
 import { Route as LibrariesLibraryIdSettingsRouteImport } from './routes/libraries.$libraryId.settings'
+import { Route as LibrariesLibraryIdVideosIndexRouteImport } from './routes/libraries.$libraryId.videos.index'
+import { Route as LibrariesLibraryIdVideosVideoIdRouteImport } from './routes/libraries.$libraryId.videos.$videoId'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -54,6 +56,18 @@ const LibrariesLibraryIdSettingsRoute =
     path: '/settings',
     getParentRoute: () => LibrariesLibraryIdRoute,
   } as any)
+const LibrariesLibraryIdVideosIndexRoute =
+  LibrariesLibraryIdVideosIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => LibrariesLibraryIdVideosRoute,
+  } as any)
+const LibrariesLibraryIdVideosVideoIdRoute =
+  LibrariesLibraryIdVideosVideoIdRouteImport.update({
+    id: '/$videoId',
+    path: '/$videoId',
+    getParentRoute: () => LibrariesLibraryIdVideosRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -61,16 +75,19 @@ export interface FileRoutesByFullPath {
   '/libraries/$libraryId': typeof LibrariesLibraryIdRouteWithChildren
   '/libraries/': typeof LibrariesIndexRoute
   '/libraries/$libraryId/settings': typeof LibrariesLibraryIdSettingsRoute
-  '/libraries/$libraryId/videos': typeof LibrariesLibraryIdVideosRoute
+  '/libraries/$libraryId/videos': typeof LibrariesLibraryIdVideosRouteWithChildren
   '/libraries/$libraryId/': typeof LibrariesLibraryIdIndexRoute
+  '/libraries/$libraryId/videos/$videoId': typeof LibrariesLibraryIdVideosVideoIdRoute
+  '/libraries/$libraryId/videos/': typeof LibrariesLibraryIdVideosIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/libraries': typeof LibrariesIndexRoute
   '/libraries/$libraryId/settings': typeof LibrariesLibraryIdSettingsRoute
-  '/libraries/$libraryId/videos': typeof LibrariesLibraryIdVideosRoute
   '/libraries/$libraryId': typeof LibrariesLibraryIdIndexRoute
+  '/libraries/$libraryId/videos/$videoId': typeof LibrariesLibraryIdVideosVideoIdRoute
+  '/libraries/$libraryId/videos': typeof LibrariesLibraryIdVideosIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -79,8 +96,10 @@ export interface FileRoutesById {
   '/libraries/$libraryId': typeof LibrariesLibraryIdRouteWithChildren
   '/libraries/': typeof LibrariesIndexRoute
   '/libraries/$libraryId/settings': typeof LibrariesLibraryIdSettingsRoute
-  '/libraries/$libraryId/videos': typeof LibrariesLibraryIdVideosRoute
+  '/libraries/$libraryId/videos': typeof LibrariesLibraryIdVideosRouteWithChildren
   '/libraries/$libraryId/': typeof LibrariesLibraryIdIndexRoute
+  '/libraries/$libraryId/videos/$videoId': typeof LibrariesLibraryIdVideosVideoIdRoute
+  '/libraries/$libraryId/videos/': typeof LibrariesLibraryIdVideosIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -92,14 +111,17 @@ export interface FileRouteTypes {
     | '/libraries/$libraryId/settings'
     | '/libraries/$libraryId/videos'
     | '/libraries/$libraryId/'
+    | '/libraries/$libraryId/videos/$videoId'
+    | '/libraries/$libraryId/videos/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/login'
     | '/libraries'
     | '/libraries/$libraryId/settings'
-    | '/libraries/$libraryId/videos'
     | '/libraries/$libraryId'
+    | '/libraries/$libraryId/videos/$videoId'
+    | '/libraries/$libraryId/videos'
   id:
     | '__root__'
     | '/'
@@ -109,6 +131,8 @@ export interface FileRouteTypes {
     | '/libraries/$libraryId/settings'
     | '/libraries/$libraryId/videos'
     | '/libraries/$libraryId/'
+    | '/libraries/$libraryId/videos/$videoId'
+    | '/libraries/$libraryId/videos/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -169,18 +193,48 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LibrariesLibraryIdSettingsRouteImport
       parentRoute: typeof LibrariesLibraryIdRoute
     }
+    '/libraries/$libraryId/videos/': {
+      id: '/libraries/$libraryId/videos/'
+      path: '/'
+      fullPath: '/libraries/$libraryId/videos/'
+      preLoaderRoute: typeof LibrariesLibraryIdVideosIndexRouteImport
+      parentRoute: typeof LibrariesLibraryIdVideosRoute
+    }
+    '/libraries/$libraryId/videos/$videoId': {
+      id: '/libraries/$libraryId/videos/$videoId'
+      path: '/$videoId'
+      fullPath: '/libraries/$libraryId/videos/$videoId'
+      preLoaderRoute: typeof LibrariesLibraryIdVideosVideoIdRouteImport
+      parentRoute: typeof LibrariesLibraryIdVideosRoute
+    }
   }
 }
 
+interface LibrariesLibraryIdVideosRouteChildren {
+  LibrariesLibraryIdVideosVideoIdRoute: typeof LibrariesLibraryIdVideosVideoIdRoute
+  LibrariesLibraryIdVideosIndexRoute: typeof LibrariesLibraryIdVideosIndexRoute
+}
+
+const LibrariesLibraryIdVideosRouteChildren: LibrariesLibraryIdVideosRouteChildren =
+  {
+    LibrariesLibraryIdVideosVideoIdRoute: LibrariesLibraryIdVideosVideoIdRoute,
+    LibrariesLibraryIdVideosIndexRoute: LibrariesLibraryIdVideosIndexRoute,
+  }
+
+const LibrariesLibraryIdVideosRouteWithChildren =
+  LibrariesLibraryIdVideosRoute._addFileChildren(
+    LibrariesLibraryIdVideosRouteChildren,
+  )
+
 interface LibrariesLibraryIdRouteChildren {
   LibrariesLibraryIdSettingsRoute: typeof LibrariesLibraryIdSettingsRoute
-  LibrariesLibraryIdVideosRoute: typeof LibrariesLibraryIdVideosRoute
+  LibrariesLibraryIdVideosRoute: typeof LibrariesLibraryIdVideosRouteWithChildren
   LibrariesLibraryIdIndexRoute: typeof LibrariesLibraryIdIndexRoute
 }
 
 const LibrariesLibraryIdRouteChildren: LibrariesLibraryIdRouteChildren = {
   LibrariesLibraryIdSettingsRoute: LibrariesLibraryIdSettingsRoute,
-  LibrariesLibraryIdVideosRoute: LibrariesLibraryIdVideosRoute,
+  LibrariesLibraryIdVideosRoute: LibrariesLibraryIdVideosRouteWithChildren,
   LibrariesLibraryIdIndexRoute: LibrariesLibraryIdIndexRoute,
 }
 
