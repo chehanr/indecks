@@ -185,9 +185,6 @@ function VideosPage() {
 
 	const offset = (page - 1) * effectivePageSize;
 
-	const libraryQuery = useQuery(
-		trpc.library.get.queryOptions({ id: libraryId })
-	);
 	const videosQuery = useQuery(
 		trpc.library.videos.queryOptions({
 			libraryId,
@@ -227,10 +224,10 @@ function VideosPage() {
 
 	return (
 		<div className="space-y-4">
-			<div className="flex items-center justify-between">
-				<h2 className="font-medium text-sm">
-					{libraryQuery.data?.videoCount ?? 0} videos
-				</h2>
+			<div className="flex flex-col gap-2 min-[480px]:flex-row min-[480px]:items-center min-[480px]:justify-between">
+				<p className="font-mono text-muted-foreground text-xs">
+					{total} results
+				</p>
 				<div className="flex items-center gap-2">
 					<NativeSelect
 						className="w-auto"

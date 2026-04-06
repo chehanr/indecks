@@ -345,10 +345,10 @@ function SearchPage() {
 				/>
 			</div>
 
-			<div className="flex items-center gap-3">
+			<div className="flex flex-col gap-3 sm:flex-row sm:items-center">
 				{indexersQuery.data && indexersQuery.data.length > 0 && (
 					<NativeSelect
-						className="flex-1"
+						className="min-w-0 flex-1"
 						onChange={(e) => setIndexerId(e.target.value || null)}
 						value={selectedIndexerId}
 					>
@@ -381,8 +381,7 @@ function SearchPage() {
 					{searchResults.data.debug.totalVectors} vectors (
 					{searchResults.data.debug.dimensions}d) | embed:{" "}
 					{searchResults.data.debug.embedMs}ms | search:{" "}
-					{searchResults.data.debug.searchMs}ms | indexer:{" "}
-					{searchResults.data.debug.indexerName}
+					{searchResults.data.debug.searchMs}ms
 				</p>
 			)}
 
