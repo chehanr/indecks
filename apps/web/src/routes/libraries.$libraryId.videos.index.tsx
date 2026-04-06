@@ -14,16 +14,18 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@indecks/ui/components/dialog";
+import { Input } from "@indecks/ui/components/input";
 import {
 	NativeSelect,
 	NativeSelectOption,
 } from "@indecks/ui/components/native-select";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronLeft, ChevronRight, FolderSearch } from "lucide-react";
-import { parseAsInteger, useQueryState } from "nuqs";
+import { ChevronLeft, ChevronRight, FolderSearch, Search } from "lucide-react";
+import { parseAsInteger, parseAsString, useQueryState } from "nuqs";
 import { useState } from "react";
 import { toast } from "sonner";
+import { useDebouncedCallback } from "use-debounce";
 
 import { BreadcrumbPortal } from "@/components/breadcrumb-slot";
 import { useJobTracking } from "@/routes/libraries.$libraryId";
@@ -185,6 +187,11 @@ function VideosPage() {
 	);
 	const libraryName = libraryQuery.data?.name ?? "...";
 
+	const [searchQuery, setSearchQuery] = useQueryState(
+		"q",
+		parseAsString.withDefault("")
+	);
+	const [inputValue, setInputValue] = useState(searchQuery);
 	const [page, setPage] = useQueryState("page", parseAsInteger.withDefault(1));
 	const [pageSize, setPageSize] = useQueryState(
 		"size",
@@ -199,9 +206,20 @@ function VideosPage() {
 
 	const offset = (page - 1) * effectivePageSize;
 
+	const debouncedSearch = useDebouncedCallback((value: string) => {
+		setSearchQuery(value.trim() || null);
+		setPage(null);
+	}, 400);
+
+	const handleInputChange = (value: string) => {
+		setInputValue(value);
+		debouncedSearch(value);
+	};
+
 	const videosQuery = useQuery(
 		trpc.library.videos.queryOptions({
 			libraryId,
+			search: searchQuery || undefined,
 			limit: effectivePageSize,
 			offset,
 		})
@@ -265,6 +283,17 @@ function VideosPage() {
 			</BreadcrumbPortal>
 
 			<div className="space-y-4">
+				<div className="flex items-center gap-3">
+					<Search className="size-4 shrink-0 text-muted-foreground" />
+					<Input
+						autoComplete="off"
+						className="flex-1"
+						onChange={(e) => handleInputChange(e.target.value)}
+						placeholder="Filter by file name..."
+						value={inputValue}
+					/>
+				</div>
+
 				<div className="flex flex-col gap-2 min-[480px]:flex-row min-[480px]:items-center min-[480px]:justify-between">
 					<p className="font-mono text-muted-foreground text-xs">
 						{total} results

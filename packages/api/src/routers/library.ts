@@ -13,7 +13,7 @@ import {
 } from "@indecks/pipeline/errors";
 import { ThumbnailCacheService } from "@indecks/pipeline/thumbnail-cache";
 import { VectorDbManagerService } from "@indecks/vector";
-import { and, count, eq, inArray } from "drizzle-orm";
+import { and, count, eq, inArray, like } from "drizzle-orm";
 import { Effect } from "effect";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -425,6 +425,7 @@ export const libraryRouter = router({
 		.input(
 			z.object({
 				libraryId: z.string(),
+				search: z.string().optional(),
 				limit: z.number().min(1).max(100).default(20),
 				offset: z.number().min(0).default(0),
 			})
@@ -435,11 +436,17 @@ export const libraryRouter = router({
 				Effect.gen(function* () {
 					const db = yield* DbService;
 
+					const conditions = [eq(videoTable.libraryId, input.libraryId)];
+					if (input.search) {
+						conditions.push(like(videoTable.fileName, `%${input.search}%`));
+					}
+					const whereClause = and(...conditions);
+
 					const [totalResult] = yield* Effect.promise(() =>
 						db
 							.select({ count: count() })
 							.from(videoTable)
-							.where(eq(videoTable.libraryId, input.libraryId))
+							.where(whereClause)
 							.all()
 					);
 					const total = totalResult?.count ?? 0;
@@ -448,7 +455,7 @@ export const libraryRouter = router({
 						db
 							.select()
 							.from(videoTable)
-							.where(eq(videoTable.libraryId, input.libraryId))
+							.where(whereClause)
 							.limit(input.limit)
 							.offset(input.offset)
 							.all()
