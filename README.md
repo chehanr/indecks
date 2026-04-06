@@ -104,3 +104,7 @@ Paths are configurable via environment variables:
 | `DATABASE_URL` | `file:./data/config/local.db` | SQLite database URL |
 | `VECTOR_DIR` | `./data/vector` | Vector database directory |
 | `THUMBNAILS_DIR` | `./data/thumbnails` | Thumbnail cache directory |
+
+## Credits
+
+Inspired by [SentrySearch](https://github.com/ssrajadh/sentrysearch) — wanted something similar but accessible via a web UI. Built over a weekend.
