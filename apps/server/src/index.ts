@@ -1,4 +1,5 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -23,13 +24,20 @@ import { Effect, Fiber, ManagedRuntime, Schedule } from "effect";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import { ThumbnailCacheServiceLive } from "./thumbnail-cache";
 
 const RANGE_PATTERN = /bytes=(\d+)-(\d*)/;
 
 const vectorDbDir = resolve(env.VECTOR_DB_DIR);
 mkdirSync(vectorDbDir, { recursive: true });
 
-const appLayer = makeAppLayer(vectorDbDir);
+const thumbnailDir = resolve(vectorDbDir, "..", "thumbnails");
+mkdirSync(thumbnailDir, { recursive: true });
+
+const appLayer = makeAppLayer(
+	vectorDbDir,
+	ThumbnailCacheServiceLive(thumbnailDir)
+);
 const appRuntime = ManagedRuntime.make(appLayer);
 
 // Run database migrations in production (Docker)
@@ -248,6 +256,70 @@ app.get("/api/video", async (c) => {
 			"Accept-Ranges": "bytes",
 			"Content-Length": String(fileSize),
 			"Content-Type": "video/mp4",
+		},
+	});
+});
+
+app.get("/api/thumbnail", async (c) => {
+	const filePath = c.req.query("path");
+	const time = c.req.query("time");
+	if (!filePath || time === undefined) {
+		return c.text("Missing path or time parameter", 400);
+	}
+
+	const seconds = Number.parseFloat(time);
+	if (Number.isNaN(seconds) || seconds < 0) {
+		return c.text("Invalid time parameter", 400);
+	}
+
+	const absPath = resolve(filePath);
+
+	const libraries = await appRuntime.runPromise(
+		Effect.gen(function* () {
+			const db = yield* DbService;
+			return yield* Effect.promise(() => db.select().from(libraryTable).all());
+		})
+	);
+
+	const isAllowed = libraries.some((lib) => {
+		const folderPaths: string[] = JSON.parse(lib.folderPaths);
+		return folderPaths.some((fp) => absPath.startsWith(resolve(fp)));
+	});
+	if (!isAllowed) {
+		return c.text("Access denied", 403);
+	}
+
+	const pathHash = createHash("sha256")
+		.update(absPath)
+		.digest("hex")
+		.slice(0, 16);
+	const thumbPath = resolve(thumbnailDir, `${pathHash}_${seconds}.jpg`);
+
+	if (!existsSync(thumbPath)) {
+		const result = spawnSync("ffmpeg", [
+			"-ss",
+			String(seconds),
+			"-i",
+			absPath,
+			"-frames:v",
+			"1",
+			"-vf",
+			"scale=320:-2",
+			"-q:v",
+			"6",
+			"-y",
+			thumbPath,
+		]);
+		if (result.status !== 0) {
+			return c.text("Thumbnail generation failed", 500);
+		}
+	}
+
+	const file = Bun.file(thumbPath);
+	return new Response(file.stream(), {
+		headers: {
+			"Content-Type": "image/jpeg",
+			"Cache-Control": "public, max-age=604800, immutable",
 		},
 	});
 });

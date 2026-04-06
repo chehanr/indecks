@@ -11,6 +11,7 @@ import {
 	LibraryNotFoundError,
 	VideoNotFoundError,
 } from "@indecks/pipeline/errors";
+import { ThumbnailCacheService } from "@indecks/pipeline/thumbnail-cache";
 import { VectorDbManagerService } from "@indecks/vector";
 import { and, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
@@ -155,10 +156,25 @@ export const libraryRouter = router({
 				Effect.gen(function* () {
 					const db = yield* DbService;
 					const vectorDbManager = yield* VectorDbManagerService;
+					const thumbCache = yield* ThumbnailCacheService;
+
+					const videos = yield* Effect.promise(() =>
+						db
+							.select({ filePath: videoTable.filePath })
+							.from(videoTable)
+							.where(eq(videoTable.libraryId, input.id))
+							.all()
+					);
+
 					yield* vectorDbManager.remove(input.id);
 					yield* Effect.promise(() =>
 						db.delete(libraryTable).where(eq(libraryTable.id, input.id))
 					);
+
+					if (videos.length > 0) {
+						yield* thumbCache.removeByPaths(videos.map((v) => v.filePath));
+					}
+
 					return { success: true };
 				})
 			)

@@ -13,6 +13,10 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LibrariesIndexRouteImport } from './routes/libraries.index'
 import { Route as LibrariesLibraryIdRouteImport } from './routes/libraries.$libraryId'
+import { Route as LibrariesLibraryIdIndexRouteImport } from './routes/libraries.$libraryId.index'
+import { Route as LibrariesLibraryIdVideosRouteImport } from './routes/libraries.$libraryId.videos'
+import { Route as LibrariesLibraryIdSettingsRouteImport } from './routes/libraries.$libraryId.settings'
+import { Route as LibrariesLibraryIdSearchRouteImport } from './routes/libraries.$libraryId.search'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -34,38 +38,96 @@ const LibrariesLibraryIdRoute = LibrariesLibraryIdRouteImport.update({
   path: '/libraries/$libraryId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LibrariesLibraryIdIndexRoute = LibrariesLibraryIdIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => LibrariesLibraryIdRoute,
+} as any)
+const LibrariesLibraryIdVideosRoute =
+  LibrariesLibraryIdVideosRouteImport.update({
+    id: '/videos',
+    path: '/videos',
+    getParentRoute: () => LibrariesLibraryIdRoute,
+  } as any)
+const LibrariesLibraryIdSettingsRoute =
+  LibrariesLibraryIdSettingsRouteImport.update({
+    id: '/settings',
+    path: '/settings',
+    getParentRoute: () => LibrariesLibraryIdRoute,
+  } as any)
+const LibrariesLibraryIdSearchRoute =
+  LibrariesLibraryIdSearchRouteImport.update({
+    id: '/search',
+    path: '/search',
+    getParentRoute: () => LibrariesLibraryIdRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/libraries/$libraryId': typeof LibrariesLibraryIdRoute
+  '/libraries/$libraryId': typeof LibrariesLibraryIdRouteWithChildren
   '/libraries/': typeof LibrariesIndexRoute
+  '/libraries/$libraryId/search': typeof LibrariesLibraryIdSearchRoute
+  '/libraries/$libraryId/settings': typeof LibrariesLibraryIdSettingsRoute
+  '/libraries/$libraryId/videos': typeof LibrariesLibraryIdVideosRoute
+  '/libraries/$libraryId/': typeof LibrariesLibraryIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/libraries/$libraryId': typeof LibrariesLibraryIdRoute
   '/libraries': typeof LibrariesIndexRoute
+  '/libraries/$libraryId/search': typeof LibrariesLibraryIdSearchRoute
+  '/libraries/$libraryId/settings': typeof LibrariesLibraryIdSettingsRoute
+  '/libraries/$libraryId/videos': typeof LibrariesLibraryIdVideosRoute
+  '/libraries/$libraryId': typeof LibrariesLibraryIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/libraries/$libraryId': typeof LibrariesLibraryIdRoute
+  '/libraries/$libraryId': typeof LibrariesLibraryIdRouteWithChildren
   '/libraries/': typeof LibrariesIndexRoute
+  '/libraries/$libraryId/search': typeof LibrariesLibraryIdSearchRoute
+  '/libraries/$libraryId/settings': typeof LibrariesLibraryIdSettingsRoute
+  '/libraries/$libraryId/videos': typeof LibrariesLibraryIdVideosRoute
+  '/libraries/$libraryId/': typeof LibrariesLibraryIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/libraries/$libraryId' | '/libraries/'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/libraries/$libraryId'
+    | '/libraries/'
+    | '/libraries/$libraryId/search'
+    | '/libraries/$libraryId/settings'
+    | '/libraries/$libraryId/videos'
+    | '/libraries/$libraryId/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/libraries/$libraryId' | '/libraries'
-  id: '__root__' | '/' | '/login' | '/libraries/$libraryId' | '/libraries/'
+  to:
+    | '/'
+    | '/login'
+    | '/libraries'
+    | '/libraries/$libraryId/search'
+    | '/libraries/$libraryId/settings'
+    | '/libraries/$libraryId/videos'
+    | '/libraries/$libraryId'
+  id:
+    | '__root__'
+    | '/'
+    | '/login'
+    | '/libraries/$libraryId'
+    | '/libraries/'
+    | '/libraries/$libraryId/search'
+    | '/libraries/$libraryId/settings'
+    | '/libraries/$libraryId/videos'
+    | '/libraries/$libraryId/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
-  LibrariesLibraryIdRoute: typeof LibrariesLibraryIdRoute
+  LibrariesLibraryIdRoute: typeof LibrariesLibraryIdRouteWithChildren
   LibrariesIndexRoute: typeof LibrariesIndexRoute
 }
 
@@ -99,13 +161,58 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LibrariesLibraryIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/libraries/$libraryId/': {
+      id: '/libraries/$libraryId/'
+      path: '/'
+      fullPath: '/libraries/$libraryId/'
+      preLoaderRoute: typeof LibrariesLibraryIdIndexRouteImport
+      parentRoute: typeof LibrariesLibraryIdRoute
+    }
+    '/libraries/$libraryId/videos': {
+      id: '/libraries/$libraryId/videos'
+      path: '/videos'
+      fullPath: '/libraries/$libraryId/videos'
+      preLoaderRoute: typeof LibrariesLibraryIdVideosRouteImport
+      parentRoute: typeof LibrariesLibraryIdRoute
+    }
+    '/libraries/$libraryId/settings': {
+      id: '/libraries/$libraryId/settings'
+      path: '/settings'
+      fullPath: '/libraries/$libraryId/settings'
+      preLoaderRoute: typeof LibrariesLibraryIdSettingsRouteImport
+      parentRoute: typeof LibrariesLibraryIdRoute
+    }
+    '/libraries/$libraryId/search': {
+      id: '/libraries/$libraryId/search'
+      path: '/search'
+      fullPath: '/libraries/$libraryId/search'
+      preLoaderRoute: typeof LibrariesLibraryIdSearchRouteImport
+      parentRoute: typeof LibrariesLibraryIdRoute
+    }
   }
 }
+
+interface LibrariesLibraryIdRouteChildren {
+  LibrariesLibraryIdSearchRoute: typeof LibrariesLibraryIdSearchRoute
+  LibrariesLibraryIdSettingsRoute: typeof LibrariesLibraryIdSettingsRoute
+  LibrariesLibraryIdVideosRoute: typeof LibrariesLibraryIdVideosRoute
+  LibrariesLibraryIdIndexRoute: typeof LibrariesLibraryIdIndexRoute
+}
+
+const LibrariesLibraryIdRouteChildren: LibrariesLibraryIdRouteChildren = {
+  LibrariesLibraryIdSearchRoute: LibrariesLibraryIdSearchRoute,
+  LibrariesLibraryIdSettingsRoute: LibrariesLibraryIdSettingsRoute,
+  LibrariesLibraryIdVideosRoute: LibrariesLibraryIdVideosRoute,
+  LibrariesLibraryIdIndexRoute: LibrariesLibraryIdIndexRoute,
+}
+
+const LibrariesLibraryIdRouteWithChildren =
+  LibrariesLibraryIdRoute._addFileChildren(LibrariesLibraryIdRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
-  LibrariesLibraryIdRoute: LibrariesLibraryIdRoute,
+  LibrariesLibraryIdRoute: LibrariesLibraryIdRouteWithChildren,
   LibrariesIndexRoute: LibrariesIndexRoute,
 }
 export const routeTree = rootRouteImport

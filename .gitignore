@@ -53,6 +53,9 @@ coverage
 # Test videos
 test-vids
 
+# Thumbnails cache
+thumbnails
+
 # Misc
 *.tgz
 .cache

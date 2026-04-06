@@ -22,6 +22,7 @@ import {
 } from "./errors";
 import type { ChunkInfo } from "./ffmpeg";
 import { FFmpegService } from "./ffmpeg";
+import { ThumbnailCacheService } from "./thumbnail-cache";
 
 type ProgressFn = (progress: number, message: string) => Effect.Effect<void>;
 
@@ -90,6 +91,7 @@ export const ProcessorServiceLive = Layer.effect(
 		const ffmpeg = yield* FFmpegService;
 		const embedSvc = yield* EmbedService;
 		const fs = yield* FileSystem.FileSystem;
+		const thumbCache = yield* ThumbnailCacheService;
 
 		interface ExistingVideo {
 			filePath: string;
@@ -222,11 +224,13 @@ export const ProcessorServiceLive = Layer.effect(
 					{ concurrency }
 				);
 
-				const staleIds = [...existingByPath.values()].map((v) => v.id);
+				const staleVideos = [...existingByPath.values()];
+				const staleIds = staleVideos.map((v) => v.id);
 				if (staleIds.length > 0) {
 					yield* Effect.promise(() =>
 						db.delete(videoTable).where(inArray(videoTable.id, staleIds))
 					);
+					yield* thumbCache.removeByPaths(staleVideos.map((v) => v.filePath));
 				}
 
 				return { added, changed, removed: staleIds.length };
