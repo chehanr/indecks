@@ -97,7 +97,14 @@ function RootComponent() {
 					<TooltipProvider>
 						<BreadcrumbSlotProvider>
 							{(breadcrumb) => (
-								<SidebarProvider>
+								<SidebarProvider
+									defaultOpen={
+										document.cookie
+											.split("; ")
+											.find((c) => c.startsWith("sidebar_state="))
+											?.split("=")[1] !== "false"
+									}
+								>
 									<AppSidebar />
 									<SidebarInset>
 										<header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
