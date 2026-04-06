@@ -10,6 +10,14 @@ import {
 	AlertDialogTrigger,
 } from "@indecks/ui/components/alert-dialog";
 import { Badge } from "@indecks/ui/components/badge";
+import {
+	Breadcrumb,
+	BreadcrumbItem,
+	BreadcrumbLink,
+	BreadcrumbList,
+	BreadcrumbPage,
+	BreadcrumbSeparator,
+} from "@indecks/ui/components/breadcrumb";
 import { Button } from "@indecks/ui/components/button";
 import {
 	Dialog,
@@ -33,11 +41,12 @@ import {
 import { Input } from "@indecks/ui/components/input";
 import { Separator } from "@indecks/ui/components/separator";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { BreadcrumbPortal } from "@/components/breadcrumb-slot";
 import { useJobTracking } from "@/routes/libraries.$libraryId";
 import { queryClient, trpc, trpcClient } from "@/utils/trpc";
 
@@ -750,6 +759,7 @@ function SettingsPage() {
 	const libraryQuery = useQuery(
 		trpc.library.get.queryOptions({ id: libraryId })
 	);
+	const libraryName = libraryQuery.data?.name ?? "...";
 	const indexersQuery = useQuery(trpc.indexer.list.queryOptions({ libraryId }));
 
 	const deleteMutation = useMutation({
@@ -764,73 +774,101 @@ function SettingsPage() {
 	});
 
 	return (
-		<div className="space-y-6">
-			<div className="space-y-4">
-				<h2 className="font-medium text-sm">Library</h2>
-				{libraryQuery.data && <EditLibraryForm library={libraryQuery.data} />}
-			</div>
+		<>
+			<BreadcrumbPortal>
+				<Breadcrumb>
+					<BreadcrumbList>
+						<BreadcrumbItem>
+							<BreadcrumbLink render={<Link to="/libraries" />}>
+								Libraries
+							</BreadcrumbLink>
+						</BreadcrumbItem>
+						<BreadcrumbSeparator />
+						<BreadcrumbItem>
+							<BreadcrumbLink
+								render={
+									<Link params={{ libraryId }} to="/libraries/$libraryId" />
+								}
+							>
+								{libraryName}
+							</BreadcrumbLink>
+						</BreadcrumbItem>
+						<BreadcrumbSeparator />
+						<BreadcrumbItem>
+							<BreadcrumbPage>Settings</BreadcrumbPage>
+						</BreadcrumbItem>
+					</BreadcrumbList>
+				</Breadcrumb>
+			</BreadcrumbPortal>
 
-			<Separator />
-
-			<div className="space-y-4">
-				<div className="flex items-center justify-between">
-					<h2 className="font-medium text-sm">Indexers</h2>
-					<AddIndexerDialog libraryId={libraryId} />
+			<div className="space-y-6">
+				<div className="space-y-4">
+					<h2 className="font-medium text-sm">Library</h2>
+					{libraryQuery.data && <EditLibraryForm library={libraryQuery.data} />}
 				</div>
-				{indexersQuery.data?.map((emb) => (
-					<IndexerCard
-						indexer={emb}
-						key={emb.id}
-						libraryId={libraryId}
-						onJobStarted={trackJob}
-					/>
-				))}
-				{indexersQuery.data?.length === 0 && (
-					<p className="text-muted-foreground text-sm">
-						No indexers configured. Add one to start indexing.
-					</p>
-				)}
-			</div>
 
-			<Separator />
+				<Separator />
 
-			<div className="space-y-4">
-				<h2 className="font-medium text-sm">Danger Zone</h2>
-				<AlertDialog>
-					<AlertDialogTrigger
-						render={
-							<Button
-								disabled={deleteMutation.isPending}
-								size="sm"
-								variant="destructive"
-							>
-								<Trash2 className="size-4" />
-								Delete Library
-							</Button>
-						}
-					/>
-					<AlertDialogContent>
-						<AlertDialogHeader>
-							<AlertDialogTitle>
-								Delete {libraryQuery.data?.name}?
-							</AlertDialogTitle>
-							<AlertDialogDescription>
-								This will permanently delete the library, all videos, indexers,
-								and vector data.
-							</AlertDialogDescription>
-						</AlertDialogHeader>
-						<AlertDialogFooter>
-							<AlertDialogCancel>Cancel</AlertDialogCancel>
-							<AlertDialogAction
-								onClick={() => deleteMutation.mutate()}
-								variant="destructive"
-							>
-								Delete
-							</AlertDialogAction>
-						</AlertDialogFooter>
-					</AlertDialogContent>
-				</AlertDialog>
+				<div className="space-y-4">
+					<div className="flex items-center justify-between">
+						<h2 className="font-medium text-sm">Indexers</h2>
+						<AddIndexerDialog libraryId={libraryId} />
+					</div>
+					{indexersQuery.data?.map((emb) => (
+						<IndexerCard
+							indexer={emb}
+							key={emb.id}
+							libraryId={libraryId}
+							onJobStarted={trackJob}
+						/>
+					))}
+					{indexersQuery.data?.length === 0 && (
+						<p className="text-muted-foreground text-sm">
+							No indexers configured. Add one to start indexing.
+						</p>
+					)}
+				</div>
+
+				<Separator />
+
+				<div className="space-y-4">
+					<h2 className="font-medium text-sm">Danger Zone</h2>
+					<AlertDialog>
+						<AlertDialogTrigger
+							render={
+								<Button
+									disabled={deleteMutation.isPending}
+									size="sm"
+									variant="destructive"
+								>
+									<Trash2 className="size-4" />
+									Delete Library
+								</Button>
+							}
+						/>
+						<AlertDialogContent>
+							<AlertDialogHeader>
+								<AlertDialogTitle>
+									Delete {libraryQuery.data?.name}?
+								</AlertDialogTitle>
+								<AlertDialogDescription>
+									This will permanently delete the library, all videos,
+									indexers, and vector data.
+								</AlertDialogDescription>
+							</AlertDialogHeader>
+							<AlertDialogFooter>
+								<AlertDialogCancel>Cancel</AlertDialogCancel>
+								<AlertDialogAction
+									onClick={() => deleteMutation.mutate()}
+									variant="destructive"
+								>
+									Delete
+								</AlertDialogAction>
+							</AlertDialogFooter>
+						</AlertDialogContent>
+					</AlertDialog>
+				</div>
 			</div>
-		</div>
+		</>
 	);
 }

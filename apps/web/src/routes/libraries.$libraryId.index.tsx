@@ -1,4 +1,12 @@
 import { Badge } from "@indecks/ui/components/badge";
+import {
+	Breadcrumb,
+	BreadcrumbItem,
+	BreadcrumbLink,
+	BreadcrumbList,
+	BreadcrumbPage,
+	BreadcrumbSeparator,
+} from "@indecks/ui/components/breadcrumb";
 import { Input } from "@indecks/ui/components/input";
 import {
 	NativeSelect,
@@ -11,6 +19,7 @@ import { parseAsInteger, parseAsString, useQueryState } from "nuqs";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDebouncedCallback } from "use-debounce";
 
+import { BreadcrumbPortal } from "@/components/breadcrumb-slot";
 import { trpc } from "@/utils/trpc";
 
 export const Route = createFileRoute("/libraries/$libraryId/")({
@@ -284,6 +293,11 @@ const DEFAULT_PAGE_SIZE = 20;
 function SearchPage() {
 	const { libraryId } = Route.useParams();
 
+	const libraryQuery = useQuery(
+		trpc.library.get.queryOptions({ id: libraryId })
+	);
+	const libraryName = libraryQuery.data?.name ?? "...";
+
 	const [searchQuery, setSearchQuery] = useQueryState(
 		"q",
 		parseAsString.withDefault("")
@@ -333,81 +347,109 @@ function SearchPage() {
 	});
 
 	return (
-		<div className="space-y-4">
-			<div className="flex items-center gap-3">
-				<Search className="size-4 shrink-0 text-muted-foreground" />
-				<Input
-					autoComplete="off"
-					className="flex-1"
-					onChange={(e) => handleInputChange(e.target.value)}
-					placeholder="Describe what you're looking for..."
-					value={inputValue}
-				/>
-			</div>
+		<>
+			<BreadcrumbPortal>
+				<Breadcrumb>
+					<BreadcrumbList>
+						<BreadcrumbItem>
+							<BreadcrumbLink render={<Link to="/libraries" />}>
+								Libraries
+							</BreadcrumbLink>
+						</BreadcrumbItem>
+						<BreadcrumbSeparator />
+						<BreadcrumbItem>
+							<BreadcrumbLink
+								render={
+									<Link params={{ libraryId }} to="/libraries/$libraryId" />
+								}
+							>
+								{libraryName}
+							</BreadcrumbLink>
+						</BreadcrumbItem>
+						<BreadcrumbSeparator />
+						<BreadcrumbItem>
+							<BreadcrumbPage>Search</BreadcrumbPage>
+						</BreadcrumbItem>
+					</BreadcrumbList>
+				</Breadcrumb>
+			</BreadcrumbPortal>
 
-			<div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-				{indexersQuery.data && indexersQuery.data.length > 0 && (
+			<div className="space-y-4">
+				<div className="flex items-center gap-3">
+					<Search className="size-4 shrink-0 text-muted-foreground" />
+					<Input
+						autoComplete="off"
+						className="flex-1"
+						onChange={(e) => handleInputChange(e.target.value)}
+						placeholder="Describe what you're looking for..."
+						value={inputValue}
+					/>
+				</div>
+
+				<div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+					{indexersQuery.data && indexersQuery.data.length > 0 && (
+						<NativeSelect
+							className="min-w-0 flex-1"
+							onChange={(e) => setIndexerId(e.target.value || null)}
+							value={selectedIndexerId}
+						>
+							{indexersQuery.data.map((idx) => (
+								<NativeSelectOption key={idx.id} value={idx.id}>
+									{idx.name} ({idx.model}, {idx.dimensions}d)
+									{idx.isDefault ? " — default" : ""}
+								</NativeSelectOption>
+							))}
+						</NativeSelect>
+					)}
 					<NativeSelect
-						className="min-w-0 flex-1"
-						onChange={(e) => setIndexerId(e.target.value || null)}
-						value={selectedIndexerId}
+						className="w-auto"
+						onChange={(e) =>
+							handlePageSizeChange(Number.parseInt(e.target.value, 10))
+						}
+						value={effectivePageSize}
 					>
-						{indexersQuery.data.map((idx) => (
-							<NativeSelectOption key={idx.id} value={idx.id}>
-								{idx.name} ({idx.model}, {idx.dimensions}d)
-								{idx.isDefault ? " — default" : ""}
+						{PAGE_SIZE_OPTIONS.map((size) => (
+							<NativeSelectOption key={size} value={size}>
+								{size} results
 							</NativeSelectOption>
 						))}
 					</NativeSelect>
-				)}
-				<NativeSelect
-					className="w-auto"
-					onChange={(e) =>
-						handlePageSizeChange(Number.parseInt(e.target.value, 10))
-					}
-					value={effectivePageSize}
-				>
-					{PAGE_SIZE_OPTIONS.map((size) => (
-						<NativeSelectOption key={size} value={size}>
-							{size} results
-						</NativeSelectOption>
-					))}
-				</NativeSelect>
-			</div>
-
-			{searchResults.data?.debug && (
-				<p className="font-mono text-muted-foreground text-xs">
-					{searchResults.data.results.length} results from{" "}
-					{searchResults.data.debug.totalVectors} vectors (
-					{searchResults.data.debug.dimensions}d) | embed:{" "}
-					{searchResults.data.debug.embedMs}ms | search:{" "}
-					{searchResults.data.debug.searchMs}ms
-				</p>
-			)}
-
-			{searchResults.isLoading && searchQuery.length > 0 && (
-				<p className="text-muted-foreground text-sm">Searching...</p>
-			)}
-
-			{searchResults.data && searchResults.data.results.length > 0 && (
-				<div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-					{searchResults.data.results.map((result) => (
-						<ResultCard key={result.chunkId} result={result} />
-					))}
 				</div>
-			)}
 
-			{searchResults.data?.results.length === 0 && (
-				<p className="text-muted-foreground text-sm">
-					No results found. Try a different query.
-				</p>
-			)}
+				{searchResults.data?.debug && (
+					<p className="font-mono text-muted-foreground text-xs">
+						{searchResults.data.results.length} results from{" "}
+						{searchResults.data.debug.totalVectors} vectors (
+						{searchResults.data.debug.dimensions}d) | embed:{" "}
+						{searchResults.data.debug.embedMs}ms | search:{" "}
+						{searchResults.data.debug.searchMs}ms
+					</p>
+				)}
 
-			{searchResults.error && (
-				<p className="text-destructive text-sm">
-					{searchResults.error.message}
-				</p>
-			)}
-		</div>
+				{searchResults.isLoading && searchQuery.length > 0 && (
+					<p className="text-muted-foreground text-sm">Searching...</p>
+				)}
+
+				{searchResults.data && searchResults.data.results.length > 0 && (
+					<div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+						{searchResults.data.results.map((result) => (
+							<ResultCard key={result.chunkId} result={result} />
+						))}
+					</div>
+				)}
+
+				{searchResults.data?.results.length === 0 && (
+					<p className="text-muted-foreground text-sm">
+						No results found. Try a different query.
+					</p>
+				)}
+
+				{searchResults.error && (
+					<p className="text-destructive text-sm">
+						{searchResults.error.message}
+					</p>
+				)}
+			</div>
+		</>
 	);
 }

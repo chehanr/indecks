@@ -1,3 +1,11 @@
+import {
+	Breadcrumb,
+	BreadcrumbItem,
+	BreadcrumbLink,
+	BreadcrumbList,
+	BreadcrumbPage,
+	BreadcrumbSeparator,
+} from "@indecks/ui/components/breadcrumb";
 import { Button } from "@indecks/ui/components/button";
 import {
 	Dialog,
@@ -17,6 +25,7 @@ import { parseAsInteger, useQueryState } from "nuqs";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { BreadcrumbPortal } from "@/components/breadcrumb-slot";
 import { useJobTracking } from "@/routes/libraries.$libraryId";
 import { queryClient, trpc, trpcClient } from "@/utils/trpc";
 
@@ -171,6 +180,11 @@ function VideosPage() {
 	const { libraryId } = Route.useParams();
 	const { trackJob } = useJobTracking();
 
+	const libraryQuery = useQuery(
+		trpc.library.get.queryOptions({ id: libraryId })
+	);
+	const libraryName = libraryQuery.data?.name ?? "...";
+
 	const [page, setPage] = useQueryState("page", parseAsInteger.withDefault(1));
 	const [pageSize, setPageSize] = useQueryState(
 		"size",
@@ -223,84 +237,112 @@ function VideosPage() {
 	};
 
 	return (
-		<div className="space-y-4">
-			<div className="flex flex-col gap-2 min-[480px]:flex-row min-[480px]:items-center min-[480px]:justify-between">
-				<p className="font-mono text-muted-foreground text-xs">
-					{total} results
-				</p>
-				<div className="flex items-center gap-2">
-					<NativeSelect
-						className="w-auto"
-						onChange={(e) =>
-							handlePageSizeChange(Number.parseInt(e.target.value, 10))
-						}
-						value={effectivePageSize}
-					>
-						{PAGE_SIZE_OPTIONS.map((size) => (
-							<NativeSelectOption key={size} value={size}>
-								{size} per page
-							</NativeSelectOption>
-						))}
-					</NativeSelect>
-					<Button
-						disabled={scanMutation.isPending}
-						onClick={() => scanMutation.mutate()}
-						size="sm"
-						variant="outline"
-					>
-						<FolderSearch className="size-4" />
-						{scanMutation.isPending ? "Scanning..." : "Scan"}
-					</Button>
-				</div>
-			</div>
+		<>
+			<BreadcrumbPortal>
+				<Breadcrumb>
+					<BreadcrumbList>
+						<BreadcrumbItem>
+							<BreadcrumbLink render={<Link to="/libraries" />}>
+								Libraries
+							</BreadcrumbLink>
+						</BreadcrumbItem>
+						<BreadcrumbSeparator />
+						<BreadcrumbItem>
+							<BreadcrumbLink
+								render={
+									<Link params={{ libraryId }} to="/libraries/$libraryId" />
+								}
+							>
+								{libraryName}
+							</BreadcrumbLink>
+						</BreadcrumbItem>
+						<BreadcrumbSeparator />
+						<BreadcrumbItem>
+							<BreadcrumbPage>Videos</BreadcrumbPage>
+						</BreadcrumbItem>
+					</BreadcrumbList>
+				</Breadcrumb>
+			</BreadcrumbPortal>
 
-			{videosQuery.isLoading && (
-				<p className="text-muted-foreground text-sm">Loading videos...</p>
-			)}
-			{videos.length === 0 && !videosQuery.isLoading && (
-				<p className="text-muted-foreground text-sm">
-					No videos found. Scan your library to discover videos.
-				</p>
-			)}
-			{videos.length > 0 && (
-				<div className="divide-y">
-					{videos.map((video) => (
-						<VideoRow
-							indexers={indexers}
-							key={video.id}
-							libraryId={libraryId}
-							onJobStarted={trackJob}
-							video={video}
-						/>
-					))}
-				</div>
-			)}
-
-			{totalPages > 1 && (
-				<div className="flex items-center justify-between">
-					<span className="text-muted-foreground text-sm">
-						Page {page} of {totalPages}
-					</span>
-					<div className="flex items-center gap-1">
+			<div className="space-y-4">
+				<div className="flex flex-col gap-2 min-[480px]:flex-row min-[480px]:items-center min-[480px]:justify-between">
+					<p className="font-mono text-muted-foreground text-xs">
+						{total} results
+					</p>
+					<div className="flex items-center gap-2">
+						<NativeSelect
+							className="w-auto"
+							onChange={(e) =>
+								handlePageSizeChange(Number.parseInt(e.target.value, 10))
+							}
+							value={effectivePageSize}
+						>
+							{PAGE_SIZE_OPTIONS.map((size) => (
+								<NativeSelectOption key={size} value={size}>
+									{size} per page
+								</NativeSelectOption>
+							))}
+						</NativeSelect>
 						<Button
-							disabled={page <= 1}
-							onClick={() => setPage(page - 1 <= 1 ? null : page - 1)}
+							disabled={scanMutation.isPending}
+							onClick={() => scanMutation.mutate()}
 							size="sm"
 							variant="outline"
 						>
-							<ChevronLeft className="size-4" />
-						</Button>
-						<Button
-							disabled={page >= totalPages}
-							onClick={() => setPage(page + 1)}
-							size="sm"
-							variant="outline"
-						>
-							<ChevronRight className="size-4" />
+							<FolderSearch className="size-4" />
+							{scanMutation.isPending ? "Scanning..." : "Scan"}
 						</Button>
 					</div>
 				</div>
-			)}
-		</div>
+
+				{videosQuery.isLoading && (
+					<p className="text-muted-foreground text-sm">Loading videos...</p>
+				)}
+				{videos.length === 0 && !videosQuery.isLoading && (
+					<p className="text-muted-foreground text-sm">
+						No videos found. Scan your library to discover videos.
+					</p>
+				)}
+				{videos.length > 0 && (
+					<div className="divide-y">
+						{videos.map((video) => (
+							<VideoRow
+								indexers={indexers}
+								key={video.id}
+								libraryId={libraryId}
+								onJobStarted={trackJob}
+								video={video}
+							/>
+						))}
+					</div>
+				)}
+
+				{totalPages > 1 && (
+					<div className="flex items-center justify-between">
+						<span className="text-muted-foreground text-sm">
+							Page {page} of {totalPages}
+						</span>
+						<div className="flex items-center gap-1">
+							<Button
+								disabled={page <= 1}
+								onClick={() => setPage(page - 1 <= 1 ? null : page - 1)}
+								size="sm"
+								variant="outline"
+							>
+								<ChevronLeft className="size-4" />
+							</Button>
+							<Button
+								disabled={page >= totalPages}
+								onClick={() => setPage(page + 1)}
+								size="sm"
+								variant="outline"
+							>
+								<ChevronRight className="size-4" />
+							</Button>
+						</div>
+					</div>
+				)}
+			</div>
+		</>
 	);
 }
