@@ -1,4 +1,10 @@
 import { Badge } from "@indecks/ui/components/badge";
+import {
+	Breadcrumb,
+	BreadcrumbItem,
+	BreadcrumbList,
+	BreadcrumbPage,
+} from "@indecks/ui/components/breadcrumb";
 import { Button } from "@indecks/ui/components/button";
 import {
 	Card,
@@ -23,6 +29,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { BreadcrumbPortal } from "@/components/breadcrumb-slot";
 import { authClient } from "@/lib/auth-client";
 import { queryClient, trpc, trpcClient } from "@/utils/trpc";
 
@@ -199,29 +206,40 @@ function LibrariesPage() {
 	const librariesQuery = useQuery(trpc.library.list.queryOptions());
 
 	return (
-		<div className="container mx-auto max-w-3xl space-y-6 px-4 py-6">
-			<div className="flex items-center justify-between">
-				<h1 className="font-bold text-2xl">Libraries</h1>
-				<CreateLibraryDialog />
-			</div>
+		<>
+			<BreadcrumbPortal>
+				<Breadcrumb>
+					<BreadcrumbList>
+						<BreadcrumbItem>
+							<BreadcrumbPage>Libraries</BreadcrumbPage>
+						</BreadcrumbItem>
+					</BreadcrumbList>
+				</Breadcrumb>
+			</BreadcrumbPortal>
 
-			{librariesQuery.isLoading && (
-				<p className="text-muted-foreground text-sm">Loading...</p>
-			)}
-
-			{librariesQuery.data && librariesQuery.data.length > 0 && (
-				<div className="grid gap-4">
-					{librariesQuery.data.map((lib) => (
-						<LibraryCard key={lib.id} library={lib} />
-					))}
+			<div className="space-y-6">
+				<div className="flex items-center justify-end">
+					<CreateLibraryDialog />
 				</div>
-			)}
 
-			{librariesQuery.data?.length === 0 && (
-				<p className="text-muted-foreground text-sm">
-					No libraries yet. Create one to get started.
-				</p>
-			)}
-		</div>
+				{librariesQuery.isLoading && (
+					<p className="text-muted-foreground text-sm">Loading...</p>
+				)}
+
+				{librariesQuery.data && librariesQuery.data.length > 0 && (
+					<div className="grid gap-4">
+						{librariesQuery.data.map((lib) => (
+							<LibraryCard key={lib.id} library={lib} />
+						))}
+					</div>
+				)}
+
+				{librariesQuery.data?.length === 0 && (
+					<p className="text-muted-foreground text-sm">
+						No libraries yet. Create one to get started.
+					</p>
+				)}
+			</div>
+		</>
 	);
 }

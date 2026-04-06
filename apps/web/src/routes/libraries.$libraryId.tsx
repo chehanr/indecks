@@ -1,3 +1,11 @@
+import {
+	Breadcrumb,
+	BreadcrumbItem,
+	BreadcrumbLink,
+	BreadcrumbList,
+	BreadcrumbPage,
+	BreadcrumbSeparator,
+} from "@indecks/ui/components/breadcrumb";
 import { Button } from "@indecks/ui/components/button";
 import { Card, CardContent } from "@indecks/ui/components/card";
 import {
@@ -22,6 +30,7 @@ import {
 	useState,
 } from "react";
 
+import { BreadcrumbPortal } from "@/components/breadcrumb-slot";
 import { authClient } from "@/lib/auth-client";
 import { queryClient, trpc, trpcClient } from "@/utils/trpc";
 
@@ -187,35 +196,31 @@ function LibraryLayout() {
 	const library = libraryQuery.data;
 
 	if (libraryQuery.isLoading) {
-		return (
-			<div className="container mx-auto max-w-[1800px] px-4 py-6">
-				<p className="text-muted-foreground">Loading...</p>
-			</div>
-		);
+		return <p className="text-muted-foreground">Loading...</p>;
 	}
 	if (!library) {
-		return (
-			<div className="container mx-auto max-w-[1800px] px-4 py-6">
-				<p className="text-destructive">Library not found</p>
-			</div>
-		);
+		return <p className="text-destructive">Library not found</p>;
 	}
 
 	return (
 		<JobTrackingContext value={{ trackedJobIds, trackJob }}>
-			<div className="container mx-auto max-w-[1800px] space-y-6 px-4 py-6">
-				{trackedJobIds.length > 0 && (
-					<div className="space-y-2">
-						{trackedJobIds.map((jobId) => (
-							<IndexingProgress
-								jobId={jobId}
-								key={jobId}
-								onDone={() => removeJob(jobId)}
-							/>
-						))}
-					</div>
-				)}
+			<BreadcrumbPortal>
+				<Breadcrumb>
+					<BreadcrumbList>
+						<BreadcrumbItem>
+							<BreadcrumbLink render={<Link to="/libraries" />}>
+								Libraries
+							</BreadcrumbLink>
+						</BreadcrumbItem>
+						<BreadcrumbSeparator />
+						<BreadcrumbItem>
+							<BreadcrumbPage>{library.name}</BreadcrumbPage>
+						</BreadcrumbItem>
+					</BreadcrumbList>
+				</Breadcrumb>
+			</BreadcrumbPortal>
 
+			<div className="space-y-6">
 				<div>
 					<nav className="flex items-center gap-4 text-sm">
 						{navLinks.map(({ to, label }) => (
@@ -233,6 +238,18 @@ function LibraryLayout() {
 					</nav>
 					<Separator className="mt-2" />
 				</div>
+
+				{trackedJobIds.length > 0 && (
+					<div className="space-y-2">
+						{trackedJobIds.map((jobId) => (
+							<IndexingProgress
+								jobId={jobId}
+								key={jobId}
+								onDone={() => removeJob(jobId)}
+							/>
+						))}
+					</div>
+				)}
 
 				<Outlet />
 			</div>
