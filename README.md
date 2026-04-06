@@ -2,6 +2,8 @@
 
 A video indexing and semantic search application. Point it at folders of video files, and it chunks, embeds, and indexes them for natural-language search.
 
+![Screenshot](docs/screenshot.png)
+
 ## Getting Started
 
 Install dependencies:
