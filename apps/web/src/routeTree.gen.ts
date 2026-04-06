@@ -33,17 +33,23 @@ const LibrariesIndexRoute = LibrariesIndexRouteImport.update({
   id: '/libraries/',
   path: '/libraries/',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any).lazy(() =>
+  import('./routes/libraries.index.lazy').then((d) => d.Route),
+)
 const LibrariesLibraryIdRoute = LibrariesLibraryIdRouteImport.update({
   id: '/libraries/$libraryId',
   path: '/libraries/$libraryId',
   getParentRoute: () => rootRouteImport,
-} as any)
+} as any).lazy(() =>
+  import('./routes/libraries.$libraryId.lazy').then((d) => d.Route),
+)
 const LibrariesLibraryIdIndexRoute = LibrariesLibraryIdIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => LibrariesLibraryIdRoute,
-} as any)
+} as any).lazy(() =>
+  import('./routes/libraries.$libraryId.index.lazy').then((d) => d.Route),
+)
 const LibrariesLibraryIdVideosRoute =
   LibrariesLibraryIdVideosRouteImport.update({
     id: '/videos',
@@ -55,19 +61,29 @@ const LibrariesLibraryIdSettingsRoute =
     id: '/settings',
     path: '/settings',
     getParentRoute: () => LibrariesLibraryIdRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/libraries.$libraryId.settings.lazy').then((d) => d.Route),
+  )
 const LibrariesLibraryIdVideosIndexRoute =
   LibrariesLibraryIdVideosIndexRouteImport.update({
     id: '/',
     path: '/',
     getParentRoute: () => LibrariesLibraryIdVideosRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/libraries.$libraryId.videos.index.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const LibrariesLibraryIdVideosVideoIdRoute =
   LibrariesLibraryIdVideosVideoIdRouteImport.update({
     id: '/$videoId',
     path: '/$videoId',
     getParentRoute: () => LibrariesLibraryIdVideosRoute,
-  } as any)
+  } as any).lazy(() =>
+    import('./routes/libraries.$libraryId.videos.$videoId.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
