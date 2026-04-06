@@ -255,36 +255,25 @@ app.get("/api/video", async (c) => {
 		return new Response(null, { status: 304 });
 	}
 
+	const MAX_CHUNK = 5 * 1024 * 1024; // 5 MB
 	const range = c.req.header("Range");
 
-	if (range) {
-		const match = range.match(RANGE_PATTERN);
-		if (match) {
-			const start = Number.parseInt(match[1] ?? "0", 10);
-			const end = match[2] ? Number.parseInt(match[2], 10) : fileSize - 1;
-			const chunkSize = end - start + 1;
+	const rangeMatch = range?.match(RANGE_PATTERN);
+	const start = rangeMatch ? Number.parseInt(rangeMatch[1] ?? "0", 10) : 0;
+	const requested = rangeMatch?.[2]
+		? Number.parseInt(rangeMatch[2], 10)
+		: undefined;
+	const end = Math.min(requested ?? start + MAX_CHUNK - 1, fileSize - 1);
+	const chunkSize = end - start + 1;
 
-			const slice = file.slice(start, end + 1);
+	const slice = file.slice(start, end + 1);
 
-			return new Response(slice.stream(), {
-				status: 206,
-				headers: {
-					"Content-Range": `bytes ${start}-${end}/${fileSize}`,
-					"Accept-Ranges": "bytes",
-					"Content-Length": String(chunkSize),
-					"Content-Type": contentType,
-					"Content-Disposition": disposition,
-					"Cache-Control": "public, max-age=86400",
-					ETag: etag,
-				},
-			});
-		}
-	}
-
-	return new Response(file.stream(), {
+	return new Response(slice.stream(), {
+		status: 206,
 		headers: {
+			"Content-Range": `bytes ${start}-${end}/${fileSize}`,
 			"Accept-Ranges": "bytes",
-			"Content-Length": String(fileSize),
+			"Content-Length": String(chunkSize),
 			"Content-Type": contentType,
 			"Content-Disposition": disposition,
 			"Cache-Control": "public, max-age=86400",
