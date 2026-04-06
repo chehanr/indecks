@@ -161,12 +161,17 @@ app.use(
 	})
 );
 
-// --- Shared path validation ---
+// --- Shared path validation with cache ---
 
-async function validateFilePath(
-	filePath: string
-): Promise<{ absPath: string } | { error: string; status: 403 }> {
-	const absPath = resolve(filePath);
+let allowedPathsCache: string[] = [];
+let allowedPathsCacheTime = 0;
+const ALLOWED_PATHS_TTL = 30_000; // 30 seconds
+
+async function getAllowedPaths(): Promise<string[]> {
+	const now = Date.now();
+	if (now - allowedPathsCacheTime < ALLOWED_PATHS_TTL) {
+		return allowedPathsCache;
+	}
 
 	const libraries = await appRuntime.runPromise(
 		Effect.gen(function* () {
@@ -175,21 +180,52 @@ async function validateFilePath(
 		})
 	);
 
-	const isAllowed = libraries.some((lib) => {
+	allowedPathsCache = libraries.flatMap((lib) => {
 		const folderPaths: string[] = JSON.parse(lib.folderPaths);
-		return folderPaths.some((fp) => absPath.startsWith(resolve(fp)));
+		return folderPaths.map((fp) => resolve(fp));
 	});
+	allowedPathsCacheTime = now;
+	return allowedPathsCache;
+}
 
-	if (!isAllowed) {
+async function validateFilePath(
+	filePath: string
+): Promise<{ absPath: string } | { error: string; status: 403 }> {
+	const absPath = resolve(filePath);
+	const allowed = await getAllowedPaths();
+
+	if (!allowed.some((fp) => absPath.startsWith(fp))) {
 		return { error: "Access denied", status: 403 };
 	}
 
 	return { absPath };
 }
 
-// --- Thumbnail generation lock ---
+// --- Thumbnail generation with concurrency limit ---
 
+const MAX_CONCURRENT_THUMBNAILS = 3;
+let activeThumbCount = 0;
+const thumbQueue: Array<() => void> = [];
 const thumbLocks = new Map<string, Promise<number | null>>();
+
+function acquireThumbSlot(): Promise<void> {
+	if (activeThumbCount < MAX_CONCURRENT_THUMBNAILS) {
+		activeThumbCount++;
+		return Promise.resolve();
+	}
+	return new Promise<void>((resolve) => {
+		thumbQueue.push(resolve);
+	});
+}
+
+function releaseThumbSlot(): void {
+	const next = thumbQueue.shift();
+	if (next) {
+		next();
+	} else {
+		activeThumbCount--;
+	}
+}
 
 function generateThumbnail(
 	absPath: string,
@@ -201,28 +237,34 @@ function generateThumbnail(
 		return existing;
 	}
 
-	const promise = new Promise<number | null>((res) => {
-		const proc = spawn("ffmpeg", [
-			"-nostdin",
-			"-ss",
-			String(seconds),
-			"-i",
-			absPath,
-			"-frames:v",
-			"1",
-			"-vf",
-			"scale=320:-2",
-			"-q:v",
-			"6",
-			"-y",
-			thumbPath,
-		]);
-		proc.stdout.resume();
-		proc.stderr.resume();
-		proc.on("close", res);
-	}).finally(() => {
-		thumbLocks.delete(thumbPath);
-	});
+	const promise = acquireThumbSlot()
+		.then(
+			() =>
+				new Promise<number | null>((res) => {
+					const proc = spawn("ffmpeg", [
+						"-nostdin",
+						"-ss",
+						String(seconds),
+						"-i",
+						absPath,
+						"-frames:v",
+						"1",
+						"-vf",
+						"scale=320:-2",
+						"-q:v",
+						"6",
+						"-y",
+						thumbPath,
+					]);
+					proc.stdout.resume();
+					proc.stderr.resume();
+					proc.on("close", res);
+				})
+		)
+		.finally(() => {
+			releaseThumbSlot();
+			thumbLocks.delete(thumbPath);
+		});
 
 	thumbLocks.set(thumbPath, promise);
 	return promise;
@@ -257,25 +299,40 @@ app.get("/api/video", async (c) => {
 		return new Response(null, { status: 304 });
 	}
 
-	const MAX_CHUNK = 5 * 1024 * 1024; // 5 MB
+	const DEFAULT_CHUNK = 5 * 1024 * 1024; // 5 MB
 	const range = c.req.header("Range");
-
 	const rangeMatch = range?.match(RANGE_PATTERN);
-	const start = rangeMatch ? Number.parseInt(rangeMatch[1] ?? "0", 10) : 0;
-	const requested = rangeMatch?.[2]
-		? Number.parseInt(rangeMatch[2], 10)
-		: undefined;
-	const end = Math.min(requested ?? start + MAX_CHUNK - 1, fileSize - 1);
-	const chunkSize = end - start + 1;
 
-	const slice = file.slice(start, end + 1);
+	if (rangeMatch) {
+		const start = Number.parseInt(rangeMatch[1] ?? "0", 10);
+		const end = rangeMatch[2]
+			? Number.parseInt(rangeMatch[2], 10)
+			: fileSize - 1;
+		const chunkSize = end - start + 1;
 
-	return new Response(slice.stream(), {
+		return new Response(file.slice(start, end + 1).stream(), {
+			status: 206,
+			headers: {
+				"Content-Range": `bytes ${start}-${end}/${fileSize}`,
+				"Accept-Ranges": "bytes",
+				"Content-Length": String(chunkSize),
+				"Content-Type": contentType,
+				"Content-Disposition": disposition,
+				"Cache-Control": "public, max-age=86400",
+				ETag: etag,
+			},
+		});
+	}
+
+	// No Range header — return a capped initial chunk to avoid buffering the entire file
+	const end = Math.min(DEFAULT_CHUNK - 1, fileSize - 1);
+
+	return new Response(file.slice(0, end + 1).stream(), {
 		status: 206,
 		headers: {
-			"Content-Range": `bytes ${start}-${end}/${fileSize}`,
+			"Content-Range": `bytes 0-${end}/${fileSize}`,
 			"Accept-Ranges": "bytes",
-			"Content-Length": String(chunkSize),
+			"Content-Length": String(end + 1),
 			"Content-Type": contentType,
 			"Content-Disposition": disposition,
 			"Cache-Control": "public, max-age=86400",
@@ -324,11 +381,19 @@ app.get("/api/thumbnail", async (c) => {
 		}
 	}
 
+	const thumbStat = await stat(thumbPath);
+	const thumbEtag = `"thumb-${thumbStat.mtimeMs.toString(36)}"`;
+
+	if (c.req.header("If-None-Match") === thumbEtag) {
+		return new Response(null, { status: 304 });
+	}
+
 	const file = Bun.file(thumbPath);
 	return new Response(file.stream(), {
 		headers: {
 			"Content-Type": "image/jpeg",
 			"Cache-Control": "public, max-age=604800, immutable",
+			ETag: thumbEtag,
 		},
 	});
 });
@@ -354,4 +419,8 @@ const shutdown = async () => {
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
-export default app;
+export default {
+	fetch: app.fetch,
+	port: 3000,
+	idleTimeout: 120,
+};
