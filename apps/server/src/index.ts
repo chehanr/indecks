@@ -27,14 +27,15 @@ import { ThumbnailCacheServiceLive } from "./thumbnail-cache";
 
 const RANGE_PATTERN = /bytes=(\d+)-(\d*)/;
 
-const vectorDbDir = resolve(env.VECTOR_DB_DIR);
-mkdirSync(vectorDbDir, { recursive: true });
+const vectorDir = resolve(env.VECTOR_DIR);
+const thumbnailDir = resolve(env.THUMBNAILS_DIR);
 
-const thumbnailDir = resolve(vectorDbDir, "..", "thumbnails");
-mkdirSync(thumbnailDir, { recursive: true });
+for (const dir of [vectorDir, thumbnailDir]) {
+	mkdirSync(dir, { recursive: true });
+}
 
 const appLayer = makeAppLayer(
-	vectorDbDir,
+	vectorDir,
 	ThumbnailCacheServiceLive(thumbnailDir)
 );
 const appRuntime = ManagedRuntime.make(appLayer);
@@ -59,9 +60,9 @@ await appRuntime.runPromise(
 			db.select().from(indexerTable).all()
 		);
 		for (const emb of indexers) {
-			const oldPath = resolve(vectorDbDir, `vector-${emb.libraryId}.db`);
+			const oldPath = resolve(vectorDir, `vector-${emb.libraryId}.db`);
 			const newPath = resolve(
-				vectorDbDir,
+				vectorDir,
 				`vector-${emb.libraryId}-${emb.id}.db`
 			);
 			if (existsSync(oldPath) && !existsSync(newPath)) {

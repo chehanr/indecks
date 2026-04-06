@@ -45,16 +45,11 @@ lerna-debug.log*
 coverage
 .nyc_output
 
-# Database
-*.db
-*.db-wal
-*.db-shm
+# Data directory (db, vector, thumbnails)
+data/
 
 # Test videos
 test-vids
-
-# Thumbnails cache
-thumbnails
 
 # Misc
 *.tgz

@@ -65,8 +65,9 @@ COPY --from=build /app/packages/db/src/migrations ./migrations
 RUN mkdir -p /data && chown bun:bun /data
 
 ENV NODE_ENV=production
-ENV DATABASE_URL=file:/data/local.db
-ENV VECTOR_DB_DIR=/data/vector-data
+ENV DATABASE_URL=file:/data/config/local.db
+ENV VECTOR_DIR=/data/vector
+ENV THUMBNAILS_DIR=/data/thumbnails
 
 EXPOSE 3000
 VOLUME ["/data"]

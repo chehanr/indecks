@@ -101,9 +101,9 @@ export function EditLibraryForm({
 	const [excludePatterns, setExcludePatterns] = useState<string[]>(() =>
 		JSON.parse(library.excludePatterns ?? "[]")
 	);
-	const [scanModifiedAfter, setScanModifiedAfter] = useState<
-		Date | undefined
-	>(() => parseDate(library.scanModifiedAfter));
+	const [scanModifiedAfter, setScanModifiedAfter] = useState<Date | undefined>(
+		() => parseDate(library.scanModifiedAfter)
+	);
 	const [scanModifiedBefore, setScanModifiedBefore] = useState<
 		Date | undefined
 	>(() => parseDate(library.scanModifiedBefore));

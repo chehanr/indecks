@@ -47,8 +47,6 @@ lerna-debug.log*
 .DS_Store
 *.pem
 
-# local db
-*.db*
 
 # typescript
 *.tsbuildinfo

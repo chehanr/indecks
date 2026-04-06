@@ -6,7 +6,8 @@ import { z } from "zod";
 export const env = createEnv({
 	server: {
 		DATABASE_URL: z.string().min(1),
-		VECTOR_DB_DIR: z.string().default("./vector-data"),
+		VECTOR_DIR: z.string().default("./data/vector"),
+		THUMBNAILS_DIR: z.string().default("./data/thumbnails"),
 		BETTER_AUTH_SECRET: z.string().min(32),
 		BETTER_AUTH_URL: z.url(),
 		CORS_ORIGIN: z.url(),
