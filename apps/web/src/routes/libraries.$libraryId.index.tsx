@@ -266,7 +266,6 @@ function ResultCard({ result }: { result: SearchResult }) {
 					}}
 					search={{
 						start: result.startTime,
-						end: result.endTime,
 					}}
 					to="/libraries/$libraryId/videos/$videoId"
 				>
