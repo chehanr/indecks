@@ -48,19 +48,51 @@ function VideoPlayer({
 }) {
 	const videoRef = useRef<HTMLVideoElement>(null);
 	const serverUrl = import.meta.env.VITE_SERVER_URL as string;
-	const src = `${serverUrl}/api/video?path=${encodeURIComponent(filePath)}&start=${startTime}&end=${endTime}`;
+	const src = `${serverUrl}/api/video?path=${encodeURIComponent(filePath)}`;
 	const poster = `${serverUrl}/api/thumbnail?path=${encodeURIComponent(filePath)}&time=${startTime}`;
 
 	useEffect(() => {
-		return () => {
-			const video = videoRef.current;
-			if (video) {
+		const video = videoRef.current;
+		if (!video) {
+			return;
+		}
+
+		let rafId: number;
+
+		const checkTime = () => {
+			if (!video.paused && video.currentTime >= endTime) {
 				video.pause();
-				video.removeAttribute("src");
-				video.load();
+				video.currentTime = startTime;
 			}
+			rafId = requestAnimationFrame(checkTime);
 		};
-	}, []);
+
+		const handleLoaded = () => {
+			video.currentTime = startTime;
+		};
+
+		const handlePlay = () => {
+			rafId = requestAnimationFrame(checkTime);
+		};
+
+		const handlePause = () => {
+			cancelAnimationFrame(rafId);
+		};
+
+		video.addEventListener("loadedmetadata", handleLoaded);
+		video.addEventListener("play", handlePlay);
+		video.addEventListener("pause", handlePause);
+
+		return () => {
+			cancelAnimationFrame(rafId);
+			video.removeEventListener("loadedmetadata", handleLoaded);
+			video.removeEventListener("play", handlePlay);
+			video.removeEventListener("pause", handlePause);
+			video.pause();
+			video.removeAttribute("src");
+			video.load();
+		};
+	}, [startTime, endTime]);
 
 	return (
 		<video

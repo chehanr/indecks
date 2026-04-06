@@ -1,9 +1,8 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { stat } from "node:fs/promises";
-import { resolve } from "node:path";
-import { Readable } from "node:stream";
+import { basename, resolve } from "node:path";
 
 import { trpcServer } from "@hono/trpc-server";
 import { createTrpcContext, makeAppLayer } from "@indecks/api/context";
@@ -147,6 +146,7 @@ app.use(
 		allowHeaders: ["Content-Type", "Authorization", "Range"],
 		credentials: true,
 		exposeHeaders: ["Content-Range", "Accept-Ranges", "Content-Length"],
+		maxAge: 86_400,
 	})
 );
 
@@ -160,12 +160,11 @@ app.use(
 	})
 );
 
-app.get("/api/video", async (c) => {
-	const filePath = c.req.query("path");
-	if (!filePath) {
-		return c.text("Missing path parameter", 400);
-	}
+// --- Shared path validation ---
 
+async function validateFilePath(
+	filePath: string
+): Promise<{ absPath: string } | { error: string; status: 403 }> {
 	const absPath = resolve(filePath);
 
 	const libraries = await appRuntime.runPromise(
@@ -179,124 +178,30 @@ app.get("/api/video", async (c) => {
 		const folderPaths: string[] = JSON.parse(lib.folderPaths);
 		return folderPaths.some((fp) => absPath.startsWith(resolve(fp)));
 	});
+
 	if (!isAllowed) {
-		return c.text("Access denied", 403);
+		return { error: "Access denied", status: 403 };
 	}
 
-	const fileStat = await stat(absPath).catch(() => null);
-	if (!fileStat) {
-		return c.text("File not found", 404);
+	return { absPath };
+}
+
+// --- Thumbnail generation lock ---
+
+const thumbLocks = new Map<string, Promise<number | null>>();
+
+function generateThumbnail(
+	absPath: string,
+	thumbPath: string,
+	seconds: number
+): Promise<number | null> {
+	const existing = thumbLocks.get(thumbPath);
+	if (existing) {
+		return existing;
 	}
 
-	const startTime = c.req.query("start");
-	const endTime = c.req.query("end");
-
-	if (startTime !== undefined && endTime !== undefined) {
-		const ss = Number.parseFloat(startTime);
-		const to = Number.parseFloat(endTime);
-		if (Number.isNaN(ss) || Number.isNaN(to) || ss < 0 || to <= ss) {
-			return c.text("Invalid start/end parameters", 400);
-		}
-
-		const ffmpeg = spawn("ffmpeg", [
-			"-ss",
-			String(ss),
-			"-to",
-			String(to),
-			"-i",
-			absPath,
-			"-c",
-			"copy",
-			"-movflags",
-			"frag_keyframe+empty_moov",
-			"-f",
-			"mp4",
-			"pipe:1",
-		]);
-
-		const stream = Readable.toWeb(ffmpeg.stdout) as ReadableStream;
-		ffmpeg.stderr.resume();
-
-		return new Response(stream, {
-			headers: {
-				"Content-Type": "video/mp4",
-				"Cache-Control": "public, max-age=86400",
-			},
-		});
-	}
-
-	const fileSize = fileStat.size;
-	const range = c.req.header("Range");
-
-	if (range) {
-		const match = range.match(RANGE_PATTERN);
-		if (match) {
-			const start = Number.parseInt(match[1] ?? "0", 10);
-			const end = match[2] ? Number.parseInt(match[2], 10) : fileSize - 1;
-			const chunkSize = end - start + 1;
-
-			const file = Bun.file(absPath);
-			const slice = file.slice(start, end + 1);
-
-			return new Response(slice.stream(), {
-				status: 206,
-				headers: {
-					"Content-Range": `bytes ${start}-${end}/${fileSize}`,
-					"Accept-Ranges": "bytes",
-					"Content-Length": String(chunkSize),
-					"Content-Type": "video/mp4",
-				},
-			});
-		}
-	}
-
-	const file = Bun.file(absPath);
-	return new Response(file.stream(), {
-		headers: {
-			"Accept-Ranges": "bytes",
-			"Content-Length": String(fileSize),
-			"Content-Type": "video/mp4",
-		},
-	});
-});
-
-app.get("/api/thumbnail", async (c) => {
-	const filePath = c.req.query("path");
-	const time = c.req.query("time");
-	if (!filePath || time === undefined) {
-		return c.text("Missing path or time parameter", 400);
-	}
-
-	const seconds = Number.parseFloat(time);
-	if (Number.isNaN(seconds) || seconds < 0) {
-		return c.text("Invalid time parameter", 400);
-	}
-
-	const absPath = resolve(filePath);
-
-	const libraries = await appRuntime.runPromise(
-		Effect.gen(function* () {
-			const db = yield* DbService;
-			return yield* Effect.promise(() => db.select().from(libraryTable).all());
-		})
-	);
-
-	const isAllowed = libraries.some((lib) => {
-		const folderPaths: string[] = JSON.parse(lib.folderPaths);
-		return folderPaths.some((fp) => absPath.startsWith(resolve(fp)));
-	});
-	if (!isAllowed) {
-		return c.text("Access denied", 403);
-	}
-
-	const pathHash = createHash("sha256")
-		.update(absPath)
-		.digest("hex")
-		.slice(0, 16);
-	const thumbPath = resolve(thumbnailDir, `${pathHash}_${seconds}.jpg`);
-
-	if (!existsSync(thumbPath)) {
-		const result = spawnSync("ffmpeg", [
+	const promise = new Promise<number | null>((res) => {
+		const proc = spawn("ffmpeg", [
 			"-ss",
 			String(seconds),
 			"-i",
@@ -310,7 +215,119 @@ app.get("/api/thumbnail", async (c) => {
 			"-y",
 			thumbPath,
 		]);
-		if (result.status !== 0) {
+		proc.stderr.resume();
+		proc.on("close", res);
+	}).finally(() => {
+		thumbLocks.delete(thumbPath);
+	});
+
+	thumbLocks.set(thumbPath, promise);
+	return promise;
+}
+
+// --- Video endpoint ---
+
+app.get("/api/video", async (c) => {
+	const filePath = c.req.query("path");
+	if (!filePath) {
+		return c.text("Missing path parameter", 400);
+	}
+
+	const result = await validateFilePath(filePath);
+	if ("error" in result) {
+		return c.text(result.error, result.status);
+	}
+
+	const fileStat = await stat(result.absPath).catch(() => null);
+	if (!fileStat) {
+		return c.text("File not found", 404);
+	}
+
+	const fileSize = fileStat.size;
+	const file = Bun.file(result.absPath);
+	const contentType = file.type || "application/octet-stream";
+	const fileName = basename(result.absPath);
+	const etag = `"${fileStat.mtimeMs.toString(36)}-${fileSize.toString(36)}"`;
+	const disposition = `inline; filename="${encodeURIComponent(fileName)}"`;
+
+	if (c.req.header("If-None-Match") === etag) {
+		return new Response(null, { status: 304 });
+	}
+
+	const range = c.req.header("Range");
+
+	if (range) {
+		const match = range.match(RANGE_PATTERN);
+		if (match) {
+			const start = Number.parseInt(match[1] ?? "0", 10);
+			const end = match[2] ? Number.parseInt(match[2], 10) : fileSize - 1;
+			const chunkSize = end - start + 1;
+
+			const slice = file.slice(start, end + 1);
+
+			return new Response(slice.stream(), {
+				status: 206,
+				headers: {
+					"Content-Range": `bytes ${start}-${end}/${fileSize}`,
+					"Accept-Ranges": "bytes",
+					"Content-Length": String(chunkSize),
+					"Content-Type": contentType,
+					"Content-Disposition": disposition,
+					"Cache-Control": "public, max-age=86400",
+					ETag: etag,
+				},
+			});
+		}
+	}
+
+	return new Response(file.stream(), {
+		headers: {
+			"Accept-Ranges": "bytes",
+			"Content-Length": String(fileSize),
+			"Content-Type": contentType,
+			"Content-Disposition": disposition,
+			"Cache-Control": "public, max-age=86400",
+			ETag: etag,
+		},
+	});
+});
+
+// --- Thumbnail endpoint ---
+
+app.get("/api/thumbnail", async (c) => {
+	const filePath = c.req.query("path");
+	const time = c.req.query("time");
+	if (!filePath || time === undefined) {
+		return c.text("Missing path or time parameter", 400);
+	}
+
+	const seconds = Number.parseFloat(time);
+	if (Number.isNaN(seconds) || seconds < 0) {
+		return c.text("Invalid time parameter", 400);
+	}
+
+	const result = await validateFilePath(filePath);
+	if ("error" in result) {
+		return c.text(result.error, result.status);
+	}
+
+	const pathHash = createHash("sha256")
+		.update(result.absPath)
+		.digest("hex")
+		.slice(0, 16);
+	const thumbPath = resolve(thumbnailDir, `${pathHash}_${seconds}.jpg`);
+
+	const thumbExists = await stat(thumbPath)
+		.then(() => true)
+		.catch(() => false);
+
+	if (!thumbExists) {
+		const exitCode = await generateThumbnail(
+			result.absPath,
+			thumbPath,
+			seconds
+		);
+		if (exitCode !== 0) {
 			return c.text("Thumbnail generation failed", 500);
 		}
 	}
