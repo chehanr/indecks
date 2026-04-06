@@ -2,6 +2,7 @@ import { Separator } from "@indecks/ui/components/separator";
 import {
 	Sidebar,
 	SidebarContent,
+	SidebarFooter,
 	SidebarGroup,
 	SidebarGroupContent,
 	SidebarInset,
@@ -27,8 +28,8 @@ import { NuqsAdapter } from "nuqs/adapters/tanstack-router";
 
 import { BreadcrumbSlotProvider } from "@/components/breadcrumb-slot";
 import { ModeToggle } from "@/components/mode-toggle";
+import { SidebarUser } from "@/components/sidebar-user";
 import { ThemeProvider } from "@/components/theme-provider";
-import UserMenu from "@/components/user-menu";
 import type { trpc } from "@/utils/trpc";
 
 import "../index.css";
@@ -79,6 +80,9 @@ function AppSidebar() {
 					</SidebarGroupContent>
 				</SidebarGroup>
 			</SidebarContent>
+			<SidebarFooter>
+				<SidebarUser />
+			</SidebarFooter>
 		</Sidebar>
 	);
 }
@@ -113,7 +117,6 @@ function RootComponent() {
 											{breadcrumb}
 											<div className="ml-auto flex items-center gap-2">
 												<ModeToggle />
-												<UserMenu />
 											</div>
 										</header>
 										<div className="flex-1 p-4">
