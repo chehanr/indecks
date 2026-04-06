@@ -87,6 +87,7 @@ function VideoDetailPage() {
 						ref={(el) => {
 							if (el && start !== undefined) {
 								el.currentTime = start;
+								el.play();
 							}
 						}}
 						src={`${import.meta.env.VITE_SERVER_URL as string}/api/video?path=${encodeURIComponent(video.filePath)}`}
