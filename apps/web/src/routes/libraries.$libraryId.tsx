@@ -108,9 +108,9 @@ function IndexingProgress({
 
 	let statusLabel = state.progressMessage ?? "Starting...";
 	if (state.status === "completed") {
-		statusLabel = "Indexing complete";
+		statusLabel = "Complete";
 	} else if (state.status === "failed") {
-		statusLabel = "Indexing failed";
+		statusLabel = "Failed";
 	} else if (state.status === "cancelled") {
 		statusLabel = "Cancelled";
 	}
@@ -204,18 +204,6 @@ function LibraryLayout() {
 	return (
 		<JobTrackingContext value={{ trackedJobIds, trackJob }}>
 			<div className="container mx-auto max-w-[1800px] space-y-6 px-4 py-6">
-				<div>
-					<h1 className="font-bold text-2xl">{library.name}</h1>
-					{(() => {
-						const paths: string[] = JSON.parse(library.folderPaths);
-						return paths.map((p) => (
-							<p className="text-muted-foreground text-sm" key={p}>
-								{p}
-							</p>
-						));
-					})()}
-				</div>
-
 				{trackedJobIds.length > 0 && (
 					<div className="space-y-2">
 						{trackedJobIds.map((jobId) => (
