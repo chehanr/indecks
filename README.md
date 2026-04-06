@@ -1,111 +1,110 @@
 # indecks
 
-This project was created with [Better-T-Stack](https://github.com/AmanVarshney01/create-better-t-stack), a modern TypeScript stack that combines React, TanStack Router, Hono, TRPC, and more.
+A video indexing and semantic search application. Point it at folders of video files, and it chunks, embeds, and indexes them for natural-language search.
 
-## Features
-
-- **TypeScript** - For type safety and improved developer experience
-- **TanStack Router** - File-based routing with full type safety
-- **TailwindCSS** - Utility-first CSS for rapid UI development
-- **Shared UI package** - shadcn/ui primitives live in `packages/ui`
-- **Hono** - Lightweight, performant server framework
-- **tRPC** - End-to-end type-safe APIs
-- **Bun** - Runtime environment
-- **Drizzle** - TypeScript-first ORM
-- **SQLite/Turso** - Database engine
-- **Authentication** - Better-Auth
-- **Biome** - Linting and formatting
-- **Turborepo** - Optimized monorepo build system
+![Screenshot](docs/screenshot.png)
 
 ## Getting Started
 
-First, install the dependencies:
+Install dependencies:
 
 ```bash
 bun install
 ```
 
-## Database Setup
-
-This project uses SQLite with Drizzle ORM.
-
-1. Start the local SQLite database (optional):
+Copy environment files:
 
 ```bash
-bun run db:local
+cp apps/server/.env.example apps/server/.env
+cp apps/web/.env.example apps/web/.env
 ```
 
-2. Update your `.env` file in the `apps/server` directory with the appropriate connection details if needed.
+Edit `apps/server/.env` and set `BETTER_AUTH_SECRET` to a random 32+ character string.
 
-3. Apply the schema to your database:
+Generate and apply database migrations:
 
 ```bash
-bun run db:push
+bun run db:generate
+bun run db:migrate
 ```
 
-Then, run the development server:
+## Development
+
+Start the dev server:
 
 ```bash
 bun run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173) in your browser to see the web application.
-The API is running at [http://localhost:3000](http://localhost:3000).
+- Web: <http://localhost:3001>
+- API: <http://localhost:3000>
 
-## UI Customization
+### Available Scripts
 
-React web apps in this stack share shadcn/ui primitives through `packages/ui`.
+- `bun run dev` - Start all apps in development mode
+- `bun run build` - Build all apps
+- `bun run dev:web` - Start only the web app
+- `bun run dev:server` - Start only the server
+- `bun run check` - Run Biome formatting and linting
+- `bun run check-types` - Check TypeScript types
+- `bun run db:generate` - Generate database migrations
+- `bun run db:migrate` - Run database migrations
+- `bun run db:studio` - Open Drizzle Studio
 
-- Change design tokens and global styles in `packages/ui/src/styles/globals.css`
-- Update shared primitives in `packages/ui/src/components/*`
-- Adjust shadcn aliases or style config in `packages/ui/components.json` and `apps/web/components.json`
+## Embedding API
 
-### Add more shared components
+indecks uses an external, OpenAI-compatible embedding API to index video content. Each library can have one or more **indexers**, each pointing at a different provider or model.
 
-Run this from the project root to add more primitives to the shared UI package:
+An indexer requires:
+
+| Setting | Description |
+| --- | --- |
+| `baseUrl` | API endpoint (e.g., `http://localhost:8000/v1`) |
+| `apiKey` | Bearer token for authentication |
+| `model` | Model identifier (e.g., `Qwen/Qwen3-VL-Embedding-2B`) |
+| `dimensions` | Expected embedding vector size (e.g., `2048`) |
+
+Any provider that serves an OpenAI-compatible embeddings endpoint works. Tested with [Qwen3-VL-Embedding-2B](https://huggingface.co/Qwen/Qwen3-VL-Embedding-2B) models served via [vLLM](https://docs.vllm.ai).
+
+## Docker
 
 ```bash
-npx shadcn@latest add accordion dialog popover sheet table -c packages/ui
+docker pull ghcr.io/chehanr/indecks:latest
+docker run -p 3000:3000 -v indecks-data:/data ghcr.io/chehanr/indecks:latest
 ```
 
-Import shared components like this:
+All data is stored under `/data` in the container. Mount a volume to persist it across restarts.
 
-```tsx
-import { Button } from "@indecks/ui/components/button";
+Override defaults with environment variables:
+
+```bash
+docker run -p 3000:3000 \
+  -v indecks-data:/data \
+  -e BETTER_AUTH_SECRET=your-secret-here \
+  -e BETTER_AUTH_URL=http://localhost:3000 \
+  -e CORS_ORIGIN=http://localhost:3000 \
+  ghcr.io/chehanr/indecks:latest
 ```
 
-### Add app-specific blocks
+## Data Directory
 
-If you want to add app-specific blocks instead of shared primitives, run the shadcn CLI from `apps/web`.
+All runtime data lives under a `data/` directory (gitignored):
 
-## Git Hooks and Formatting
-
-- Format and lint fix: `bun run check`
-
-## Project Structure
-
-```
-indecks/
-├── apps/
-│   ├── web/         # Frontend application (React + TanStack Router)
-│   └── server/      # Backend API (Hono, TRPC)
-├── packages/
-│   ├── ui/          # Shared shadcn/ui components and styles
-│   ├── api/         # API layer / business logic
-│   ├── auth/        # Authentication configuration & logic
-│   └── db/          # Database schema & queries
+```text
+data/
+  config/       # SQLite database
+  vector/       # Vector DB files (sqlite-vec)
+  thumbnails/   # Thumbnail cache
 ```
 
-## Available Scripts
+Paths are configurable via environment variables:
 
-- `bun run dev`: Start all applications in development mode
-- `bun run build`: Build all applications
-- `bun run dev:web`: Start only the web application
-- `bun run dev:server`: Start only the server
-- `bun run check-types`: Check TypeScript types across all apps
-- `bun run db:push`: Push schema changes to database
-- `bun run db:generate`: Generate database client/types
-- `bun run db:migrate`: Run database migrations
-- `bun run db:studio`: Open database studio UI
-- `bun run db:local`: Start the local SQLite database
-- `bun run check`: Run Biome formatting and linting
+| Variable | Default | Description |
+| --- | --- | --- |
+| `DATABASE_URL` | `file:./data/config/local.db` | SQLite database URL |
+| `VECTOR_DIR` | `./data/vector` | Vector database directory |
+| `THUMBNAILS_DIR` | `./data/thumbnails` | Thumbnail cache directory |
+
+## Credits
+
+Inspired by [SentrySearch](https://github.com/ssrajadh/sentrysearch) — wanted something similar but accessible via a web UI. Built over a weekend.

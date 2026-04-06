@@ -128,3 +128,25 @@ Most formatting and common issues are automatically fixed by Biome. Run `bun x u
 ## Database
 
 - **Always use migrations**, never `drizzle-kit push`. Run `bun run db:generate` to create migrations, then `bun run db:migrate` to apply them.
+
+## UI (shadcn)
+
+Shared shadcn/ui primitives live in `packages/ui`. This project uses **Base UI** (not Radix) — components use the `render` prop pattern instead of `asChild`.
+
+- Design tokens and global styles: `packages/ui/src/styles/globals.css`
+- Shared primitives: `packages/ui/src/components/*`
+- Config: `packages/ui/components.json` and `apps/web/components.json`
+
+Add shared components from the project root:
+
+```bash
+bunx shadcn@latest add accordion dialog -c packages/ui
+```
+
+Import shared components:
+
+```tsx
+import { Button } from "@indecks/ui/components/button";
+```
+
+For app-specific blocks (not shared), run the shadcn CLI from `apps/web`.

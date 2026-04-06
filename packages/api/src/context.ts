@@ -7,11 +7,15 @@ import { EmbedServiceLive } from "@indecks/pipeline/embedder";
 import { FFmpegServiceLive } from "@indecks/pipeline/ffmpeg";
 import { ProcessorServiceLive } from "@indecks/pipeline/processor";
 import { JobQueueServiceLive } from "@indecks/pipeline/queue";
+import type { ThumbnailCacheService } from "@indecks/pipeline/thumbnail-cache";
 import { VectorDbManagerServiceLive } from "@indecks/vector";
 import { Effect, Layer, type ManagedRuntime } from "effect";
 import type { Context as HonoContext } from "hono";
 
-export const makeAppLayer = (vectorDbDir: string) => {
+export const makeAppLayer = (
+	vectorDbDir: string,
+	thumbCacheLayer: Layer.Layer<ThumbnailCacheService>
+) => {
 	const ConfigLayer = ServerConfigLive;
 	const FsLayer = BunFileSystem.layer;
 	const CmdLayer = BunCommandExecutor.layer.pipe(Layer.provide(FsLayer));
@@ -29,7 +33,13 @@ export const makeAppLayer = (vectorDbDir: string) => {
 	const FFmpegLayer = FFmpegServiceLive.pipe(Layer.provide(PlatformLayer));
 	const ProcessorLayer = ProcessorServiceLive.pipe(
 		Layer.provide(
-			Layer.mergeAll(DbLayer, EmbedLayer, FFmpegLayer, PlatformLayer)
+			Layer.mergeAll(
+				DbLayer,
+				EmbedLayer,
+				FFmpegLayer,
+				PlatformLayer,
+				thumbCacheLayer
+			)
 		)
 	);
 	const JobQueueLayer = JobQueueServiceLive.pipe(Layer.provide(ProcessorLayer));
@@ -43,7 +53,8 @@ export const makeAppLayer = (vectorDbDir: string) => {
 		EmbedLayer,
 		FFmpegLayer,
 		ProcessorLayer,
-		JobQueueLayer
+		JobQueueLayer,
+		thumbCacheLayer
 	);
 };
 

@@ -20,13 +20,13 @@ export const video = sqliteTable(
 		filePath: text("file_path").notNull(),
 		fileName: text("file_name").notNull(),
 		fileSize: integer("file_size"),
+		modifiedAt: integer("modified_at", { mode: "timestamp_ms" }),
 		duration: real("duration"),
 		status: text("status", {
 			enum: ["pending", "processing", "indexed", "error"],
 		})
 			.default("pending")
 			.notNull(),
-		fileHash: text("file_hash"),
 		errorMessage: text("error_message"),
 		createdAt: integer("created_at", { mode: "timestamp_ms" })
 			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)

@@ -1,5 +1,4 @@
 import { DbService } from "@indecks/db";
-import { RecordNotFoundError } from "@indecks/db/errors";
 import { job as jobTable } from "@indecks/db/schema/job";
 import { desc, eq } from "drizzle-orm";
 import { Effect } from "effect";
@@ -10,27 +9,6 @@ import { jobEvents } from "../events";
 import { protectedProcedure, publicProcedure, router } from "../index";
 
 export const jobRouter = router({
-	get: protectedProcedure
-		.input(z.object({ id: z.string() }))
-		.query(({ ctx, input }) =>
-			runEffect(
-				ctx.runtime,
-				Effect.gen(function* () {
-					const db = yield* DbService;
-					const row = yield* Effect.promise(() =>
-						db.select().from(jobTable).where(eq(jobTable.id, input.id)).get()
-					);
-					if (!row) {
-						return yield* new RecordNotFoundError({
-							entity: "Job",
-							id: input.id,
-						});
-					}
-					return row;
-				})
-			)
-		),
-
 	list: protectedProcedure
 		.input(
 			z.object({

@@ -86,8 +86,11 @@ const makeVectorDb = (
 				upsert: (chunkId, embedding) =>
 					Effect.try({
 						try: () => {
+							db.prepare("DELETE FROM vec_chunks WHERE chunk_id = ?").run(
+								chunkId
+							);
 							db.prepare(
-								"INSERT OR REPLACE INTO vec_chunks(chunk_id, embedding) VALUES (?, vec_f32(?))"
+								"INSERT INTO vec_chunks(chunk_id, embedding) VALUES (?, vec_f32(?))"
 							).run(chunkId, embedding);
 						},
 						catch: (e) =>
@@ -100,12 +103,16 @@ const makeVectorDb = (
 				upsertBatch: (items) =>
 					Effect.try({
 						try: () => {
-							const stmt = db.prepare(
-								"INSERT OR REPLACE INTO vec_chunks(chunk_id, embedding) VALUES (?, vec_f32(?))"
+							const delStmt = db.prepare(
+								"DELETE FROM vec_chunks WHERE chunk_id = ?"
+							);
+							const insStmt = db.prepare(
+								"INSERT INTO vec_chunks(chunk_id, embedding) VALUES (?, vec_f32(?))"
 							);
 							const tx = db.transaction(() => {
 								for (const item of items) {
-									stmt.run(item.chunkId, item.embedding);
+									delStmt.run(item.chunkId);
+									insStmt.run(item.chunkId, item.embedding);
 								}
 							});
 							tx();
@@ -275,7 +282,13 @@ export const VectorDbManagerServiceLive = (dir: string) =>
 					const filePrefix = `vector-${libraryId}-`;
 					const files = yield* fsService
 						.readDirectory(dir)
-						.pipe(Effect.catchAll(() => Effect.succeed([] as string[])));
+						.pipe(
+							Effect.catchAll((err) =>
+								Effect.logWarning(`Vector DB dir read failed: ${err}`).pipe(
+									Effect.as([] as string[])
+								)
+							)
+						);
 					for (const file of files) {
 						if (
 							file.startsWith(filePrefix) &&

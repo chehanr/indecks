@@ -1,0 +1,1 @@
+ALTER TABLE `video` ADD `modified_at` integer;

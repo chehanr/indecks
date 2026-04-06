@@ -9,13 +9,21 @@ export const library = sqliteTable(
 	{
 		id: text("id").primaryKey(),
 		name: text("name").notNull(),
-		folderPath: text("folder_path").notNull(),
+		folderPaths: text("folder_paths").notNull(),
 		status: text("status", {
 			enum: ["idle", "scanning", "indexing", "ready", "error"],
 		})
 			.default("idle")
 			.notNull(),
 		videoCount: integer("video_count").default(0).notNull(),
+		scanConcurrency: integer("scan_concurrency").default(3).notNull(),
+		excludePatterns: text("exclude_patterns").default("[]").notNull(),
+		scanModifiedAfter: integer("scan_modified_after", {
+			mode: "timestamp_ms",
+		}),
+		scanModifiedBefore: integer("scan_modified_before", {
+			mode: "timestamp_ms",
+		}),
 		createdAt: integer("created_at", { mode: "timestamp_ms" })
 			.default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)
 			.notNull(),

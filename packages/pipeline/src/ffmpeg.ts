@@ -1,34 +1,35 @@
+import { readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { Command, CommandExecutor, FileSystem } from "@effect/platform";
-import type { PlatformError } from "@effect/platform/Error";
-import { Context, Effect, Layer } from "effect";
+import { Context, Duration, Effect, Layer, Queue } from "effect";
 
 import { FFmpegError } from "./errors";
 
-const SUPPORTED_EXTENSIONS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm"]);
 const MP4_EXT = /\.mp4$/;
+const FREEZE_DURATION_RE = /freeze_duration:\s*([\d.]+)/;
+const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm"]);
 
-const walkVideoDir = (
-	fsService: FileSystem.FileSystem,
+const findVideos = (
 	dir: string,
-	videos: string[]
-): Effect.Effect<void, PlatformError> =>
-	Effect.gen(function* () {
-		const entries = yield* fsService.readDirectory(dir);
-		for (const entry of entries) {
-			const fullPath = join(dir, entry);
-			const info = yield* fsService.stat(fullPath);
-			if (info.type === "Directory") {
-				yield* walkVideoDir(fsService, fullPath, videos);
-			} else if (info.type === "File") {
+	excludePatterns: string[] = []
+): Effect.Effect<string[]> =>
+	Effect.promise(async () => {
+		const regexes = excludePatterns.map((p) => new RegExp(p));
+		const entries = await readdir(dir, { recursive: true });
+		return entries
+			.filter((entry) => {
 				const ext = entry.slice(entry.lastIndexOf(".")).toLowerCase();
-				if (SUPPORTED_EXTENSIONS.has(ext)) {
-					videos.push(fullPath);
+				if (!VIDEO_EXTENSIONS.has(ext)) {
+					return false;
 				}
-			}
-		}
+				if (regexes.some((re) => re.test(entry))) {
+					return false;
+				}
+				return true;
+			})
+			.map((entry) => join(dir, entry));
 	});
 
 export interface ChunkInfo {
@@ -40,6 +41,9 @@ export interface ChunkInfo {
 
 export interface ChunkOptions {
 	chunkDuration?: number;
+	concurrency: number;
+	downscaleFps?: number;
+	downscaleHeight?: number;
 	overlap?: number;
 }
 
@@ -47,6 +51,8 @@ export interface DownscaleOptions {
 	fps?: number;
 	height?: number;
 }
+
+const CMD_TIMEOUT = Duration.minutes(2);
 
 const runString = (
 	executor: CommandExecutor.CommandExecutor,
@@ -56,15 +62,27 @@ const runString = (
 	Command.make(cmd, ...args).pipe(
 		Command.string,
 		Effect.provideService(CommandExecutor.CommandExecutor, executor),
-		Effect.catchAll((e) =>
-			Effect.fail(
+		Effect.timeoutFail({
+			duration: CMD_TIMEOUT,
+			onTimeout: () =>
+				new FFmpegError({
+					command: `${cmd} ${args.join(" ")}`,
+					exitCode: -1,
+					stderr: "Command timed out",
+				}),
+		}),
+		Effect.catchAll((e) => {
+			if (e instanceof FFmpegError) {
+				return Effect.fail(e);
+			}
+			return Effect.fail(
 				new FFmpegError({
 					command: `${cmd} ${args.join(" ")}`,
 					exitCode: -1,
 					stderr: String(e),
 				})
-			)
-		)
+			);
+		})
 	);
 
 const runExitCode = (
@@ -86,6 +104,15 @@ const runExitCode = (
 						})
 					)
 		),
+		Effect.timeoutFail({
+			duration: CMD_TIMEOUT,
+			onTimeout: () =>
+				new FFmpegError({
+					command: `${cmd} ${args.join(" ")}`,
+					exitCode: -1,
+					stderr: "Command timed out",
+				}),
+		}),
 		Effect.catchAll((e) => {
 			if (e instanceof FFmpegError) {
 				return Effect.fail(e);
@@ -114,16 +141,38 @@ const getVideoDuration = (
 			filePath,
 		]);
 		const info = JSON.parse(stdout) as {
-			format: { duration: string };
+			format?: { duration?: string };
 		};
-		return Number.parseFloat(info.format.duration);
+		const raw = info.format?.duration;
+		if (raw === undefined) {
+			return yield* Effect.fail(
+				new FFmpegError({
+					command: `ffprobe ${filePath}`,
+					exitCode: -1,
+					stderr: "No duration in format info",
+				})
+			);
+		}
+		return Number.parseFloat(raw);
 	});
 
 export interface FFmpegServiceShape {
 	readonly chunkVideo: (
 		filePath: string,
-		options?: ChunkOptions
+		options: ChunkOptions
 	) => Effect.Effect<ChunkInfo[], FFmpegError>;
+	readonly chunkVideoStreamed: (
+		filePath: string,
+		options: ChunkOptions,
+		queue: Queue.Queue<ChunkInfo | null>
+	) => Effect.Effect<
+		{
+			produce: Effect.Effect<void, FFmpegError>;
+			tmpDir: string;
+			total: number;
+		},
+		FFmpegError
+	>;
 	readonly cleanupChunks: (chunks: ChunkInfo[]) => Effect.Effect<void>;
 	readonly downscaleChunk: (
 		chunkPath: string,
@@ -134,9 +183,13 @@ export interface FFmpegServiceShape {
 	) => Effect.Effect<number, FFmpegError>;
 	readonly isStillFrame: (
 		chunkPath: string,
+		duration: number,
 		threshold?: number
 	) => Effect.Effect<boolean>;
-	readonly scanDirectory: (dirPath: string) => Effect.Effect<string[]>;
+	readonly scanDirectory: (
+		dirPath: string,
+		excludePatterns?: string[]
+	) => Effect.Effect<string[]>;
 }
 
 export class FFmpegService extends Context.Tag("FFmpegService")<
@@ -153,9 +206,15 @@ export const FFmpegServiceLive = Layer.effect(
 		return {
 			getVideoDuration: (filePath) => getVideoDuration(executor, filePath),
 
-			chunkVideo: (filePath, options = {}) =>
+			chunkVideo: (filePath, options) =>
 				Effect.gen(function* () {
-					const { chunkDuration = 30, overlap = 5 } = options;
+					const {
+						chunkDuration = 30,
+						overlap = 5,
+						downscaleHeight,
+						downscaleFps,
+						concurrency: chunkConcurrency,
+					} = options;
 					const absPath = resolve(filePath);
 					const duration = yield* getVideoDuration(executor, absPath);
 					const tmpDir = join(tmpdir(), `indecks_chunks_${Date.now()}`);
@@ -170,44 +229,23 @@ export const FFmpegServiceLive = Layer.effect(
 						)
 					);
 
+					const useDownscale = downscaleHeight || downscaleFps;
+					const codecArgs: string[] = useDownscale
+						? [
+								"-vf",
+								`scale=-2:${downscaleHeight ?? 480},fps=${downscaleFps ?? 5}`,
+								"-c:v",
+								"libx264",
+								"-preset",
+								"ultrafast",
+								"-an",
+							]
+						: ["-c", "copy"];
+
 					const step = chunkDuration - overlap;
-					const chunks: ChunkInfo[] = [];
 
-					if (duration <= chunkDuration) {
-						const chunkPath = join(tmpDir, "chunk_000.mp4");
-						yield* runExitCode(executor, "ffmpeg", [
-							"-y",
-							"-ss",
-							"0",
-							"-i",
-							absPath,
-							"-t",
-							String(duration),
-							"-c",
-							"copy",
-							chunkPath,
-						]);
-						return [
-							{
-								chunkPath,
-								sourceFile: absPath,
-								startTime: 0,
-								endTime: duration,
-							},
-						];
-					}
-
-					let start = 0;
-					let idx = 0;
-					while (start < duration) {
-						const end = Math.min(start + chunkDuration, duration);
-						const t = end - start;
-						const chunkPath = join(
-							tmpDir,
-							`chunk_${String(idx).padStart(3, "0")}.mp4`
-						);
-
-						yield* runExitCode(executor, "ffmpeg", [
+					const makeChunk = (start: number, t: number, chunkPath: string) =>
+						runExitCode(executor, "ffmpeg", [
 							"-y",
 							"-ss",
 							String(start),
@@ -215,26 +253,164 @@ export const FFmpegServiceLive = Layer.effect(
 							absPath,
 							"-t",
 							String(t),
-							"-c",
-							"copy",
+							...codecArgs,
 							chunkPath,
 						]);
 
-						chunks.push({
-							chunkPath,
-							sourceFile: absPath,
-							startTime: start,
-							endTime: end,
-						});
+					// Precompute all chunk specs
+					const specs: Array<{
+						chunkPath: string;
+						endTime: number;
+						startTime: number;
+						t: number;
+					}> = [];
 
-						start += step;
-						idx++;
-						if (start + overlap >= duration) {
-							break;
+					if (duration <= chunkDuration) {
+						specs.push({
+							startTime: 0,
+							endTime: duration,
+							t: duration,
+							chunkPath: join(tmpDir, "chunk_000.mp4"),
+						});
+					} else {
+						let start = 0;
+						let idx = 0;
+						while (start < duration) {
+							const end = Math.min(start + chunkDuration, duration);
+							specs.push({
+								startTime: start,
+								endTime: end,
+								t: end - start,
+								chunkPath: join(
+									tmpDir,
+									`chunk_${String(idx).padStart(3, "0")}.mp4`
+								),
+							});
+							start += step;
+							idx++;
+							if (start + overlap >= duration) {
+								break;
+							}
 						}
 					}
 
-					return chunks;
+					// Run ffmpeg in parallel
+					yield* Effect.forEach(
+						specs,
+						(spec) => makeChunk(spec.startTime, spec.t, spec.chunkPath),
+						{ concurrency: chunkConcurrency }
+					);
+
+					return specs.map((spec) => ({
+						chunkPath: spec.chunkPath,
+						sourceFile: absPath,
+						startTime: spec.startTime,
+						endTime: spec.endTime,
+					}));
+				}),
+
+			chunkVideoStreamed: (filePath, options, queue) =>
+				Effect.gen(function* () {
+					const {
+						chunkDuration = 30,
+						overlap = 5,
+						downscaleHeight,
+						downscaleFps,
+					} = options;
+					const absPath = resolve(filePath);
+					const duration = yield* getVideoDuration(executor, absPath);
+					const tmpDir = join(tmpdir(), `indecks_chunks_${Date.now()}`);
+					yield* fs.makeDirectory(tmpDir, { recursive: true }).pipe(
+						Effect.mapError(
+							(e) =>
+								new FFmpegError({
+									command: "mkdir tmpdir",
+									exitCode: -1,
+									stderr: String(e),
+								})
+						)
+					);
+
+					const useDownscale = downscaleHeight || downscaleFps;
+					const codecArgs: string[] = useDownscale
+						? [
+								"-vf",
+								`scale=-2:${downscaleHeight ?? 480},fps=${downscaleFps ?? 5}`,
+								"-c:v",
+								"libx264",
+								"-preset",
+								"ultrafast",
+								"-an",
+							]
+						: ["-c", "copy"];
+
+					const step = chunkDuration - overlap;
+
+					// Precompute chunk specs to know total count upfront
+					const specs: Array<{
+						chunkPath: string;
+						endTime: number;
+						startTime: number;
+						t: number;
+					}> = [];
+
+					if (duration <= chunkDuration) {
+						specs.push({
+							startTime: 0,
+							endTime: duration,
+							t: duration,
+							chunkPath: join(tmpDir, "chunk_000.mp4"),
+						});
+					} else {
+						let start = 0;
+						let idx = 0;
+						while (start < duration) {
+							const end = Math.min(start + chunkDuration, duration);
+							specs.push({
+								startTime: start,
+								endTime: end,
+								t: end - start,
+								chunkPath: join(
+									tmpDir,
+									`chunk_${String(idx).padStart(3, "0")}.mp4`
+								),
+							});
+							start += step;
+							idx++;
+							if (start + overlap >= duration) {
+								break;
+							}
+						}
+					}
+
+					// Return total count and a produce effect that creates chunks sequentially
+					const produce = Effect.forEach(
+						specs,
+						(spec) =>
+							runExitCode(executor, "ffmpeg", [
+								"-y",
+								"-ss",
+								String(spec.startTime),
+								"-i",
+								absPath,
+								"-t",
+								String(spec.t),
+								...codecArgs,
+								spec.chunkPath,
+							]).pipe(
+								Effect.flatMap(() =>
+									Queue.offer(queue, {
+										chunkPath: spec.chunkPath,
+										sourceFile: absPath,
+										startTime: spec.startTime,
+										endTime: spec.endTime,
+									})
+								)
+							),
+						{ discard: true }
+					);
+
+					return { total: specs.length, produce, tmpDir };
 				}),
 
 			downscaleChunk: (chunkPath, options = {}) =>
@@ -259,80 +435,46 @@ export const FFmpegServiceLive = Layer.effect(
 					return outPath;
 				}),
 
-			isStillFrame: (chunkPath, threshold = 0.98) =>
+			isStillFrame: (chunkPath, duration, threshold = 0.98) =>
 				Effect.gen(function* () {
-					const tmpDir = join(tmpdir(), `indecks_still_${Date.now()}`);
-					yield* fs
-						.makeDirectory(tmpDir, { recursive: true })
-						.pipe(Effect.ignore);
-
-					const durationResult = yield* getVideoDuration(
-						executor,
-						chunkPath
-					).pipe(Effect.option);
-
-					if (durationResult._tag === "None") {
-						return false;
-					}
-					const duration = durationResult.value;
-
-					const times = [duration * 0.25, duration * 0.5, duration * 0.75];
-
-					// Extract frames in parallel
-					yield* Effect.forEach(
-						times,
-						(t, idx) =>
-							runExitCode(executor, "ffmpeg", [
-								"-y",
-								"-ss",
-								String(t),
-								"-i",
-								chunkPath,
-								"-frames:v",
-								"1",
-								join(tmpDir, `frame_${String(idx).padStart(3, "0")}.jpg`),
-							]).pipe(Effect.ignore),
-						{ concurrency: 3 }
-					);
-
-					const sizes: number[] = [];
-					for (let i = 0; i < 3; i++) {
-						const framePath = join(
-							tmpDir,
-							`frame_${String(i).padStart(3, "0")}.jpg`
-						);
-						const exists = yield* fs
-							.exists(framePath)
-							.pipe(Effect.orElseSucceed(() => false));
-						if (exists) {
-							const info = yield* fs.stat(framePath).pipe(Effect.orDie);
-							sizes.push(Number(info.size));
-						}
-						yield* fs.remove(framePath).pipe(Effect.ignore);
-					}
-					yield* fs.remove(tmpDir, { recursive: true }).pipe(Effect.ignore);
-
-					if (sizes.length < 2) {
+					if (duration < 0.5) {
 						return false;
 					}
 
-					const minSize = Math.min(...sizes);
-					const maxSize = Math.max(...sizes);
-					if (maxSize === 0) {
+					// Single-pass freeze detection via ffmpeg filter
+					const output = yield* runString(executor, "ffmpeg", [
+						"-i",
+						chunkPath,
+						"-vf",
+						"freezedetect=n=0.003:d=0.5",
+						"-f",
+						"null",
+						"-",
+					]).pipe(Effect.catchAll(() => Effect.succeed("")));
+
+					// freezedetect outputs freeze_duration in stderr/stdout
+					// If freeze covers >= threshold of total duration, it's a still frame
+					const match = FREEZE_DURATION_RE.exec(output);
+					if (!match?.[1]) {
 						return false;
 					}
-
-					return minSize / maxSize >= threshold;
+					const freezeDuration = Number.parseFloat(match[1]);
+					return freezeDuration / duration >= threshold;
 				}),
 
-			scanDirectory: (dirPath) =>
+			scanDirectory: (dirPath, excludePatterns) =>
 				Effect.gen(function* () {
 					const absDir = resolve(dirPath);
-					const videos: string[] = [];
-					yield* walkVideoDir(fs, absDir, videos).pipe(Effect.ignore);
+					const videos = yield* findVideos(absDir, excludePatterns);
 					videos.sort();
 					return videos;
-				}).pipe(Effect.catchAll(() => Effect.succeed([] as string[]))),
+				}).pipe(
+					Effect.catchAll((err) =>
+						Effect.logError(
+							`Directory scan failed for ${dirPath}: ${err}`
+						).pipe(Effect.as([] as string[]))
+					)
+				),
 
 			cleanupChunks: (chunks) =>
 				Effect.forEach(

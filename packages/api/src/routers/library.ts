@@ -11,14 +11,29 @@ import {
 	LibraryNotFoundError,
 	VideoNotFoundError,
 } from "@indecks/pipeline/errors";
+import { ThumbnailCacheService } from "@indecks/pipeline/thumbnail-cache";
 import { VectorDbManagerService } from "@indecks/vector";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, count, eq, inArray, like } from "drizzle-orm";
 import { Effect } from "effect";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 
 import { runEffect } from "../effect-trpc";
 import { protectedProcedure, router } from "../index";
+
+const validateFolderPaths = (folderPaths: string[]) =>
+	Effect.gen(function* () {
+		const fsService = yield* FileSystem.FileSystem;
+		for (const folderPath of folderPaths) {
+			yield* fsService
+				.access(folderPath)
+				.pipe(
+					Effect.catchAll(() =>
+						Effect.fail(new FolderNotAccessibleError({ path: folderPath }))
+					)
+				);
+		}
+	});
 
 export const libraryRouter = router({
 	list: protectedProcedure.query(({ ctx }) =>
@@ -61,7 +76,11 @@ export const libraryRouter = router({
 		.input(
 			z.object({
 				name: z.string().min(1),
-				folderPath: z.string().min(1),
+				folderPaths: z.array(z.string().min(1)).min(1),
+				scanConcurrency: z.number().min(1).max(16).default(3),
+				excludePatterns: z.array(z.string()).default([]),
+				scanModifiedAfter: z.string().datetime().nullable().optional(),
+				scanModifiedBefore: z.string().datetime().nullable().optional(),
 			})
 		)
 		.mutation(({ ctx, input }) =>
@@ -69,24 +88,22 @@ export const libraryRouter = router({
 				ctx.runtime,
 				Effect.gen(function* () {
 					const db = yield* DbService;
-
-					const fsService = yield* FileSystem.FileSystem;
-					yield* fsService.access(input.folderPath).pipe(
-						Effect.catchAll(() =>
-							Effect.fail(
-								new FolderNotAccessibleError({
-									path: input.folderPath,
-								})
-							)
-						)
-					);
+					yield* validateFolderPaths(input.folderPaths);
 
 					const id = nanoid();
 					yield* Effect.promise(() =>
 						db.insert(libraryTable).values({
 							id,
 							name: input.name,
-							folderPath: input.folderPath,
+							folderPaths: JSON.stringify(input.folderPaths),
+							scanConcurrency: input.scanConcurrency,
+							excludePatterns: JSON.stringify(input.excludePatterns),
+							scanModifiedAfter: input.scanModifiedAfter
+								? new Date(input.scanModifiedAfter)
+								: null,
+							scanModifiedBefore: input.scanModifiedBefore
+								? new Date(input.scanModifiedBefore)
+								: null,
 						})
 					);
 
@@ -100,7 +117,11 @@ export const libraryRouter = router({
 			z.object({
 				id: z.string(),
 				name: z.string().min(1).optional(),
-				folderPath: z.string().min(1).optional(),
+				folderPaths: z.array(z.string().min(1)).min(1).optional(),
+				scanConcurrency: z.number().min(1).max(16).optional(),
+				excludePatterns: z.array(z.string()).optional(),
+				scanModifiedAfter: z.string().datetime().nullable().optional(),
+				scanModifiedBefore: z.string().datetime().nullable().optional(),
 			})
 		)
 		.mutation(({ ctx, input }) =>
@@ -114,18 +135,25 @@ export const libraryRouter = router({
 					if (fields.name !== undefined) {
 						set.name = fields.name;
 					}
-					if (fields.folderPath !== undefined) {
-						const fsService = yield* FileSystem.FileSystem;
-						yield* fsService.access(fields.folderPath as string).pipe(
-							Effect.catchAll(() =>
-								Effect.fail(
-									new FolderNotAccessibleError({
-										path: fields.folderPath as string,
-									})
-								)
-							)
-						);
-						set.folderPath = fields.folderPath;
+					if (fields.folderPaths !== undefined) {
+						yield* validateFolderPaths(fields.folderPaths);
+						set.folderPaths = JSON.stringify(fields.folderPaths);
+					}
+					if (fields.scanConcurrency !== undefined) {
+						set.scanConcurrency = fields.scanConcurrency;
+					}
+					if (fields.excludePatterns !== undefined) {
+						set.excludePatterns = JSON.stringify(fields.excludePatterns);
+					}
+					if (fields.scanModifiedAfter !== undefined) {
+						set.scanModifiedAfter = fields.scanModifiedAfter
+							? new Date(fields.scanModifiedAfter)
+							: null;
+					}
+					if (fields.scanModifiedBefore !== undefined) {
+						set.scanModifiedBefore = fields.scanModifiedBefore
+							? new Date(fields.scanModifiedBefore)
+							: null;
 					}
 
 					yield* Effect.promise(() =>
@@ -145,11 +173,63 @@ export const libraryRouter = router({
 				Effect.gen(function* () {
 					const db = yield* DbService;
 					const vectorDbManager = yield* VectorDbManagerService;
+					const thumbCache = yield* ThumbnailCacheService;
+
+					const videos = yield* Effect.promise(() =>
+						db
+							.select({ filePath: videoTable.filePath })
+							.from(videoTable)
+							.where(eq(videoTable.libraryId, input.id))
+							.all()
+					);
+
 					yield* vectorDbManager.remove(input.id);
 					yield* Effect.promise(() =>
 						db.delete(libraryTable).where(eq(libraryTable.id, input.id))
 					);
+
+					if (videos.length > 0) {
+						yield* thumbCache.removeByPaths(videos.map((v) => v.filePath));
+					}
+
 					return { success: true };
+				})
+			)
+		),
+
+	startScan: protectedProcedure
+		.input(z.object({ id: z.string() }))
+		.mutation(({ ctx, input }) =>
+			runEffect(
+				ctx.runtime,
+				Effect.gen(function* () {
+					const db = yield* DbService;
+
+					const lib = yield* Effect.promise(() =>
+						db
+							.select()
+							.from(libraryTable)
+							.where(eq(libraryTable.id, input.id))
+							.get()
+					);
+
+					if (!lib) {
+						return yield* new LibraryNotFoundError({
+							libraryId: input.id,
+						});
+					}
+
+					const jobId = nanoid();
+					yield* Effect.promise(() =>
+						db.insert(jobTable).values({
+							id: jobId,
+							type: "scan_library",
+							libraryId: input.id,
+							status: "pending",
+						})
+					);
+
+					return { jobId };
 				})
 			)
 		),
@@ -336,18 +416,65 @@ export const libraryRouter = router({
 			)
 		),
 
-	videos: protectedProcedure
-		.input(z.object({ libraryId: z.string() }))
+	video: protectedProcedure
+		.input(z.object({ id: z.string() }))
 		.query(({ ctx, input }) =>
 			runEffect(
 				ctx.runtime,
 				Effect.gen(function* () {
 					const db = yield* DbService;
+					const row = yield* Effect.promise(() =>
+						db
+							.select()
+							.from(videoTable)
+							.where(eq(videoTable.id, input.id))
+							.get()
+					);
+					if (!row) {
+						return yield* new VideoNotFoundError({ videoId: input.id });
+					}
+					return row;
+				})
+			)
+		),
+
+	videos: protectedProcedure
+		.input(
+			z.object({
+				libraryId: z.string(),
+				search: z.string().optional(),
+				limit: z.number().min(1).max(100).default(20),
+				offset: z.number().min(0).default(0),
+			})
+		)
+		.query(({ ctx, input }) =>
+			runEffect(
+				ctx.runtime,
+				Effect.gen(function* () {
+					const db = yield* DbService;
+
+					const conditions = [eq(videoTable.libraryId, input.libraryId)];
+					if (input.search) {
+						conditions.push(like(videoTable.fileName, `%${input.search}%`));
+					}
+					const whereClause = and(...conditions);
+
+					const [totalResult] = yield* Effect.promise(() =>
+						db
+							.select({ count: count() })
+							.from(videoTable)
+							.where(whereClause)
+							.all()
+					);
+					const total = totalResult?.count ?? 0;
+
 					const videos = yield* Effect.promise(() =>
 						db
 							.select()
 							.from(videoTable)
-							.where(eq(videoTable.libraryId, input.libraryId))
+							.where(whereClause)
+							.limit(input.limit)
+							.offset(input.offset)
 							.all()
 					);
 
@@ -384,10 +511,13 @@ export const libraryRouter = router({
 						videoIndexers.set(row.videoId, list);
 					}
 
-					return videos.map((v) => ({
-						...v,
-						indexedBy: videoIndexers.get(v.id) ?? [],
-					}));
+					return {
+						items: videos.map((v) => ({
+							...v,
+							indexedBy: videoIndexers.get(v.id) ?? [],
+						})),
+						total,
+					};
 				})
 			)
 		),

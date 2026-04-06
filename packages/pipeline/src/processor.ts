@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { basename } from "node:path";
 
 import { FileSystem } from "@effect/platform";
 import type { Db } from "@indecks/db";
@@ -10,7 +9,7 @@ import { library as libraryTable } from "@indecks/db/schema/library";
 import { video as videoTable } from "@indecks/db/schema/video";
 import type { VectorDb, VectorDbManagerShape } from "@indecks/vector";
 import { and, eq, inArray } from "drizzle-orm";
-import { Context, Duration, Effect, Layer } from "effect";
+import { Context, Duration, Effect, Layer, Queue } from "effect";
 import { nanoid } from "nanoid";
 
 import type { EmbedConfig } from "./embedder";
@@ -21,13 +20,16 @@ import {
 	LibraryNotFoundError,
 	VideoNotFoundError,
 } from "./errors";
+import type { ChunkInfo } from "./ffmpeg";
 import { FFmpegService } from "./ffmpeg";
+import { ThumbnailCacheService } from "./thumbnail-cache";
 
 type ProgressFn = (progress: number, message: string) => Effect.Effect<void>;
 
 export interface IndexerContext {
 	readonly chunkDuration: number;
 	readonly chunkOverlap: number;
+	readonly concurrency: number;
 	readonly config: EmbedConfig;
 	readonly downscaleFps: number;
 	readonly indexerId: string;
@@ -42,17 +44,9 @@ const makeChunkId = (
 	startTime: number
 ): string => {
 	const raw = `${videoId}:${indexerId}:${startTime}`;
-	return createHash("sha256").update(raw).digest("hex").slice(0, 16);
+	const hash = Bun.SHA256.hash(raw, "hex") as string;
+	return hash.slice(0, 16);
 };
-
-const hashFile = (filePath: string): Effect.Effect<string> =>
-	Effect.async<string>((resume) => {
-		const hash = createHash("sha256");
-		const stream = createReadStream(filePath);
-		stream.on("data", (chunk) => hash.update(chunk));
-		stream.on("end", () => resume(Effect.succeed(hash.digest("hex"))));
-		stream.on("error", () => resume(Effect.succeed("")));
-	});
 
 export interface ProcessorServiceShape {
 	readonly indexLibrary: (
@@ -97,90 +91,150 @@ export const ProcessorServiceLive = Layer.effect(
 		const ffmpeg = yield* FFmpegService;
 		const embedSvc = yield* EmbedService;
 		const fs = yield* FileSystem.FileSystem;
+		const thumbCache = yield* ThumbnailCacheService;
 
 		interface ExistingVideo {
-			fileHash: string | null;
 			filePath: string;
+			fileSize: number | null;
 			id: string;
+			modifiedAt: Date | null;
 		}
 
-		const detectChangedVideos = (
-			db: Db,
-			videos: ExistingVideo[]
-		): Effect.Effect<number> =>
+		// Phase 1: Walk filesystem, collect video paths. No DB, no ffprobe.
+		const walkFolders = (
+			folderPaths: string[],
+			excludePatterns: string[],
+			onProgress?: ProgressFn
+		): Effect.Effect<string[]> =>
 			Effect.gen(function* () {
-				let changed = 0;
-				for (const vid of videos) {
-					const currentHash = yield* hashFile(vid.filePath);
-					if (vid.fileHash && vid.fileHash !== currentHash) {
-						yield* Effect.promise(() =>
-							db.delete(chunkTable).where(eq(chunkTable.videoId, vid.id))
-						);
-						const duration = yield* ffmpeg
-							.getVideoDuration(vid.filePath)
-							.pipe(Effect.option);
-						const fileStat = yield* fs.stat(vid.filePath).pipe(Effect.orDie);
-						yield* Effect.promise(() =>
-							db
-								.update(videoTable)
-								.set({
-									fileHash: currentHash,
-									fileSize: Number(fileStat.size),
-									duration: duration._tag === "Some" ? duration.value : null,
-									status: "pending",
-									errorMessage: null,
-								})
-								.where(eq(videoTable.id, vid.id))
-						);
-						changed++;
-					} else if (!vid.fileHash) {
-						yield* Effect.promise(() =>
-							db
-								.update(videoTable)
-								.set({ fileHash: currentHash })
-								.where(eq(videoTable.id, vid.id))
-						);
-					}
+				const all: string[] = [];
+				for (const folder of folderPaths) {
+					yield* progress(onProgress, -1, `Scanning: ${folder}`);
+					const paths = yield* ffmpeg.scanDirectory(folder, excludePatterns);
+					all.push(...paths);
 				}
-				return changed;
+				return [...new Set(all)];
 			});
 
-		const addNewVideos = (
+		// Handle a single file: mtime+size check only, no ffprobe.
+		const handleFile = (
 			db: Db,
 			libraryId: string,
-			newPaths: string[],
-			onProgress?: ProgressFn
-		): Effect.Effect<number> =>
+			filePath: string,
+			existing: ExistingVideo | undefined
+		): Effect.Effect<"added" | "changed" | "unchanged"> =>
 			Effect.gen(function* () {
-				let added = 0;
-				for (const filePath of newPaths) {
-					const fileName = filePath.split("/").pop() ?? filePath;
-					const fileStat = yield* fs.stat(filePath).pipe(Effect.orDie);
-					const fileHash = yield* hashFile(filePath);
-					const duration = yield* ffmpeg
-						.getVideoDuration(filePath)
-						.pipe(Effect.option);
+				const bunFile = Bun.file(filePath);
+
+				if (existing) {
+					const currentSize = bunFile.size;
+					const currentMtime = bunFile.lastModified;
+					const dbMtime = existing.modifiedAt?.getTime() ?? null;
+
+					if (
+						dbMtime !== null &&
+						currentMtime === dbMtime &&
+						existing.fileSize === currentSize
+					) {
+						return "unchanged";
+					}
 
 					yield* Effect.promise(() =>
-						db.insert(videoTable).values({
-							id: nanoid(),
-							libraryId,
-							filePath,
-							fileName,
-							fileSize: Number(fileStat.size),
-							fileHash,
-							duration: duration._tag === "Some" ? duration.value : null,
-							status: "pending",
-						})
+						db.delete(chunkTable).where(eq(chunkTable.videoId, existing.id))
 					);
-
-					added++;
-					const pct = Math.round(
-						10 + (newPaths.indexOf(filePath) / newPaths.length) * 90
+					yield* Effect.promise(() =>
+						db
+							.update(videoTable)
+							.set({
+								fileSize: currentSize,
+								modifiedAt: new Date(currentMtime),
+								duration: null,
+								status: "pending",
+								errorMessage: null,
+							})
+							.where(eq(videoTable.id, existing.id))
 					);
-					yield* progress(onProgress, pct, `Found ${added} new videos...`);
+					return "changed";
 				}
-				return added;
+
+				yield* Effect.promise(() =>
+					db.insert(videoTable).values({
+						id: nanoid(),
+						libraryId,
+						filePath,
+						fileName: basename(filePath),
+						fileSize: bunFile.size,
+						modifiedAt: new Date(bunFile.lastModified),
+						status: "pending",
+					})
+				);
+				return "added";
+			});
+
+		// Phase 2: Reconcile discovered paths against DB with parallel workers.
+		const reconcileFiles = (
+			db: Db,
+			libraryId: string,
+			videoPaths: string[],
+			existingByPath: Map<string, ExistingVideo>,
+			concurrency: number,
+			onProgress?: ProgressFn
+		): Effect.Effect<{ added: number; changed: number; removed: number }> =>
+			Effect.gen(function* () {
+				const total = videoPaths.length;
+				const activeFiles = new Set<string>();
+				let processed = 0;
+				let added = 0;
+				let changed = 0;
+
+				const report = (): Effect.Effect<void> => {
+					const names = [...activeFiles].map((f) => basename(f)).join(", ");
+					const pct = Math.round((processed / total) * 100);
+					return progress(onProgress, pct, `${names} (${processed}/${total})`);
+				};
+
+				yield* Effect.forEach(
+					videoPaths,
+					(filePath) =>
+						Effect.gen(function* () {
+							activeFiles.add(filePath);
+							yield* report();
+
+							const existing = existingByPath.get(filePath);
+							if (existing) {
+								existingByPath.delete(filePath);
+							}
+
+							const result = yield* handleFile(
+								db,
+								libraryId,
+								filePath,
+								existing
+							);
+							if (result === "added") {
+								added++;
+							}
+							if (result === "changed") {
+								changed++;
+							}
+
+							processed++;
+							activeFiles.delete(filePath);
+							yield* report();
+						}),
+					{ concurrency }
+				);
+
+				const staleVideos = [...existingByPath.values()];
+				const staleIds = staleVideos.map((v) => v.id);
+				if (staleIds.length > 0) {
+					yield* Effect.promise(() =>
+						db.delete(videoTable).where(inArray(videoTable.id, staleIds))
+					);
+					yield* thumbCache.removeByPaths(staleVideos.map((v) => v.filePath));
+				}
+
+				return { added, changed, removed: staleIds.length };
 			});
 
 		const scanLibraryFolder = (
@@ -203,57 +257,79 @@ export const ProcessorServiceLive = Layer.effect(
 					return yield* new LibraryNotFoundError({ libraryId });
 				}
 
-				yield* progress(onProgress, 0, "Scanning folder for videos...");
+				yield* Effect.logInfo(
+					`Starting scan for library ${lib.name} (${libraryId})`
+				);
 
-				const videoPaths = yield* ffmpeg.scanDirectory(lib.folderPath);
-				const diskPaths = new Set(videoPaths);
+				yield* Effect.promise(() =>
+					db
+						.update(libraryTable)
+						.set({ status: "scanning" })
+						.where(eq(libraryTable.id, libraryId))
+				);
 
+				// Phase 1: Walk filesystem (indefinite progress)
+				const folderPaths: string[] = JSON.parse(lib.folderPaths);
+				const excludePatterns: string[] = JSON.parse(
+					lib.excludePatterns ?? "[]"
+				);
+				let videoPaths = yield* walkFolders(
+					folderPaths,
+					excludePatterns,
+					onProgress
+				);
+
+				// Filter by modification time range
+				const { scanModifiedAfter, scanModifiedBefore } = lib;
+				if (scanModifiedAfter || scanModifiedBefore) {
+					videoPaths = yield* Effect.sync(() => {
+						const filtered: string[] = [];
+						for (const filePath of videoPaths) {
+							const mtime = Bun.file(filePath).lastModified;
+							if (scanModifiedAfter && mtime < scanModifiedAfter.getTime()) {
+								continue;
+							}
+							if (scanModifiedBefore && mtime > scanModifiedBefore.getTime()) {
+								continue;
+							}
+							filtered.push(filePath);
+						}
+						return filtered;
+					});
+				}
+
+				// Load existing videos from DB
 				const existingVideos = yield* Effect.promise(() =>
 					db
 						.select({
 							id: videoTable.id,
 							filePath: videoTable.filePath,
-							fileHash: videoTable.fileHash,
+							fileSize: videoTable.fileSize,
+							modifiedAt: videoTable.modifiedAt,
 						})
 						.from(videoTable)
 						.where(eq(videoTable.libraryId, libraryId))
 						.all()
 				);
-
-				// Remove videos whose files no longer exist on disk
-				const staleIds = existingVideos
-					.filter((v) => !diskPaths.has(v.filePath))
-					.map((v) => v.id);
-
-				if (staleIds.length > 0) {
-					yield* Effect.promise(() =>
-						db.delete(videoTable).where(inArray(videoTable.id, staleIds))
-					);
-					yield* progress(
-						onProgress,
-						5,
-						`Removed ${staleIds.length} missing videos.`
-					);
-				}
-
-				// Check for changed files (hash mismatch)
-				const currentVideos = existingVideos.filter((v) =>
-					diskPaths.has(v.filePath)
+				const existingByPath = new Map(
+					existingVideos.map((v) => [v.filePath, v])
 				);
-				const changed = yield* detectChangedVideos(db, currentVideos);
 
-				if (changed > 0) {
-					yield* progress(
-						onProgress,
-						10,
-						`${changed} videos changed, will re-index.`
-					);
-				}
+				yield* progress(
+					onProgress,
+					0,
+					`Found ${videoPaths.length} videos. Processing...`
+				);
 
-				// Add new videos
-				const existingPaths = new Set(existingVideos.map((v) => v.filePath));
-				const newPaths = videoPaths.filter((p) => !existingPaths.has(p));
-				const added = yield* addNewVideos(db, libraryId, newPaths, onProgress);
+				// Phase 2: Reconcile (definite progress)
+				const { added, changed, removed } = yield* reconcileFiles(
+					db,
+					libraryId,
+					videoPaths,
+					existingByPath,
+					lib.scanConcurrency,
+					onProgress
+				);
 
 				yield* Effect.promise(() =>
 					db
@@ -265,10 +341,13 @@ export const ProcessorServiceLive = Layer.effect(
 						.where(eq(libraryTable.id, libraryId))
 				);
 
+				yield* Effect.logInfo(
+					`Scan complete for ${lib.name}: ${added} added, ${changed} changed, ${removed} removed`
+				);
 				yield* progress(
 					onProgress,
 					100,
-					`Scan complete. ${added} added, ${changed} changed, ${staleIds.length} removed.`
+					`Scan complete. ${added} added, ${changed} changed, ${removed} removed.`
 				);
 				return added + changed;
 			});
@@ -300,145 +379,231 @@ export const ProcessorServiceLive = Layer.effect(
 				const chunkOpts = {
 					chunkDuration: ctx.chunkDuration,
 					overlap: ctx.chunkOverlap,
+					downscaleFps: ctx.downscaleFps,
+					downscaleHeight: 480,
+					concurrency: ctx.concurrency,
 				};
 
-				const chunks = yield* ffmpeg
-					.chunkVideo(vid.filePath, chunkOpts)
-					.pipe(Effect.catchAll(() => Effect.succeed([])));
-
-				const totalChunks = chunks.length;
-				let processed = 0;
-
-				yield* Effect.forEach(
-					chunks,
-					(chunkInfo) =>
-						Effect.gen(function* () {
-							yield* checkCancelled(db, ctx.jobId);
-							const chunkId = makeChunkId(
-								vid.id,
-								ctx.indexerId,
-								chunkInfo.startTime
-							);
-							const still = yield* ffmpeg.isStillFrame(chunkInfo.chunkPath);
-
-							yield* Effect.promise(() =>
-								db
-									.insert(chunkTable)
-									.values({
-										id: chunkId,
-										videoId: vid.id,
-										indexerId: ctx.indexerId,
-										startTime: chunkInfo.startTime,
-										endTime: chunkInfo.endTime,
-										isStillFrame: still,
-										embeddingStatus: still ? "skipped" : "pending",
-									})
-									.onConflictDoNothing()
-							);
-
-							if (still) {
-								processed++;
-								const pct = Math.round((processed / totalChunks) * 100);
-								yield* progress(
-									onProgress,
-									pct,
-									`Chunk ${processed}/${totalChunks} (skipped - still frame)`
-								);
-								return;
-							}
-
-							const downscaledPath = yield* ffmpeg
-								.downscaleChunk(chunkInfo.chunkPath, {
-									fps: ctx.downscaleFps,
-								})
-								.pipe(Effect.catchAll(() => Effect.succeed(null)));
-
-							if (downscaledPath) {
-								const videoBytes = yield* fs
-									.readFile(downscaledPath)
-									.pipe(Effect.orDie);
-								const videoBuffer = Buffer.from(videoBytes);
-
-								const embeddingResult = yield* embedSvc
-									.embedVideo(videoBuffer, ctx.config, ctx.instruction)
-									.pipe(Effect.either);
-
-								if (embeddingResult._tag === "Right") {
-									yield* ctx.vectorDb
-										.upsert(chunkId, new Float32Array(embeddingResult.right))
-										.pipe(
-											Effect.flatMap(() =>
-												Effect.promise(() =>
-													db
-														.update(chunkTable)
-														.set({ embeddingStatus: "embedded" })
-														.where(eq(chunkTable.id, chunkId))
-												)
-											),
-											Effect.catchAll(() =>
-												Effect.promise(() =>
-													db
-														.update(chunkTable)
-														.set({ embeddingStatus: "error" })
-														.where(eq(chunkTable.id, chunkId))
-												)
-											)
-										);
-								} else {
-									yield* Effect.promise(() =>
-										db
-											.update(chunkTable)
-											.set({ embeddingStatus: "error" })
-											.where(eq(chunkTable.id, chunkId))
-									);
-								}
-
-								yield* fs.remove(downscaledPath).pipe(Effect.ignore);
-							} else {
-								yield* Effect.promise(() =>
-									db
-										.update(chunkTable)
-										.set({ embeddingStatus: "error" })
-										.where(eq(chunkTable.id, chunkId))
-								);
-							}
-
-							processed++;
-							const pct = Math.round((processed / totalChunks) * 100);
-							yield* progress(
-								onProgress,
-								pct,
-								`Embedded chunk ${processed}/${totalChunks}`
-							);
-						}).pipe(
-							Effect.timeout(Duration.minutes(5)),
-							Effect.catchTag("TimeoutException", () =>
-								Effect.gen(function* () {
-									const chunkId = makeChunkId(
-										vid.id,
-										ctx.indexerId,
-										chunkInfo.startTime
-									);
-									yield* Effect.promise(() =>
-										db
-											.update(chunkTable)
-											.set({ embeddingStatus: "error" })
-											.where(eq(chunkTable.id, chunkId))
-									);
-									processed++;
-									const pct = Math.round((processed / totalChunks) * 100);
-									yield* progress(
-										onProgress,
-										pct,
-										`Chunk ${processed}/${totalChunks} (timed out)`
-									);
-								})
-							)
-						),
-					{ concurrency: 4 }
+				yield* progress(
+					onProgress,
+					0,
+					`${vid.fileName} — Splitting into chunks...`
 				);
 
-				yield* ffmpeg.cleanupChunks(chunks);
+				// Producer-consumer: producer creates chunks sequentially,
+				// consumers process them as soon as they appear.
+				// null = poison pill signalling no more chunks.
+				const queue = yield* Queue.bounded<ChunkInfo | null>(ctx.concurrency);
+
+				const {
+					total: totalChunks,
+					produce,
+					tmpDir,
+				} = yield* ffmpeg
+					.chunkVideoStreamed(vid.filePath, chunkOpts, queue)
+					.pipe(
+						Effect.catchAll((err) =>
+							Effect.logError(
+								`Chunking setup failed for ${vid.fileName}: ${err}`
+							).pipe(
+								Effect.flatMap(() =>
+									Effect.forEach(
+										Array.from({ length: ctx.concurrency }),
+										() => Queue.offer(queue, null),
+										{ discard: true }
+									)
+								),
+								Effect.as({
+									total: 0,
+									produce: Effect.void,
+									tmpDir: null as string | null,
+								})
+							)
+						)
+					);
+
+				yield* Effect.logInfo(
+					`${vid.fileName}: ${totalChunks} chunks (concurrency: ${ctx.concurrency})`
+				);
+
+				let processed = 0;
+				const pendingUpserts: Array<{
+					chunkId: string;
+					embedding: Float32Array;
+				}> = [];
+
+				// Send one null per consumer so each exits its loop
+				const sendPoisonPills = Effect.forEach(
+					Array.from({ length: ctx.concurrency }),
+					() => Queue.offer(queue, null),
+					{ discard: true }
+				);
+
+				// Producer: create chunks one at a time, push to queue
+				const producer = produce.pipe(
+					Effect.tap(() => sendPoisonPills),
+					Effect.catchAll((err) =>
+						Effect.logError(`Chunking failed for ${vid.fileName}: ${err}`).pipe(
+							Effect.flatMap(() => sendPoisonPills)
+						)
+					)
+				);
+
+				const insertChunkRecord = (chunkInfo: ChunkInfo) =>
+					Effect.promise(() =>
+						db
+							.insert(chunkTable)
+							.values({
+								id: makeChunkId(vid.id, ctx.indexerId, chunkInfo.startTime),
+								videoId: vid.id,
+								indexerId: ctx.indexerId,
+								startTime: chunkInfo.startTime,
+								endTime: chunkInfo.endTime,
+								isStillFrame: false,
+								embeddingStatus: "pending" as const,
+							})
+							.onConflictDoNothing()
+					);
+
+				const processChunk = (
+					chunkInfo: ChunkInfo
+				): Effect.Effect<void, JobCancelledError | Error> =>
+					Effect.gen(function* () {
+						yield* checkCancelled(db, ctx.jobId);
+
+						const chunkId = makeChunkId(
+							vid.id,
+							ctx.indexerId,
+							chunkInfo.startTime
+						);
+
+						yield* insertChunkRecord(chunkInfo);
+
+						const chunkDuration = chunkInfo.endTime - chunkInfo.startTime;
+						const still = yield* ffmpeg.isStillFrame(
+							chunkInfo.chunkPath,
+							chunkDuration
+						);
+
+						if (still) {
+							yield* Effect.promise(() =>
+								db
+									.update(chunkTable)
+									.set({
+										isStillFrame: true,
+										embeddingStatus: "skipped",
+									})
+									.where(eq(chunkTable.id, chunkId))
+							);
+							return;
+						}
+
+						const videoBytes = yield* fs
+							.readFile(chunkInfo.chunkPath)
+							.pipe(Effect.orDie);
+						const embedding = yield* embedSvc.embedVideo(
+							Buffer.from(videoBytes),
+							ctx.config,
+							ctx.instruction
+						);
+						pendingUpserts.push({
+							chunkId,
+							embedding: new Float32Array(embedding),
+						});
+					});
+
+				const markChunkError = (
+					chunkInfo: ChunkInfo,
+					err: unknown
+				): Effect.Effect<void> => {
+					const chunkId = makeChunkId(
+						vid.id,
+						ctx.indexerId,
+						chunkInfo.startTime
+					);
+					return Effect.logError(
+						`Chunk error [${vid.fileName} @ ${chunkInfo.startTime}s]: ${err}`
+					).pipe(
+						Effect.flatMap(() =>
+							Effect.promise(() =>
+								db
+									.update(chunkTable)
+									.set({ embeddingStatus: "error" })
+									.where(eq(chunkTable.id, chunkId))
+							)
+						),
+						Effect.ignore
+					);
+				};
+
+				// Consumer: pull from queue, process concurrently
+				const consumer = Effect.gen(function* () {
+					while (true) {
+						const item = yield* Queue.take(queue).pipe(
+							Effect.catchAll(() => Effect.fail("done" as const))
+						);
+						if (item === null) {
+							break;
+						}
+						const chunkInfo = item;
+						yield* processChunk(chunkInfo).pipe(
+							Effect.timeout(Duration.minutes(5)),
+							Effect.catchAll((err) => {
+								if (err instanceof JobCancelledError) {
+									return Queue.shutdown(queue).pipe(
+										Effect.flatMap(() => Effect.fail(err))
+									);
+								}
+								return markChunkError(chunkInfo, err);
+							}),
+							Effect.catchAllDefect((err) => markChunkError(chunkInfo, err)),
+							Effect.tap(() => {
+								processed++;
+								const pct =
+									totalChunks > 0
+										? Math.round((processed / totalChunks) * 100)
+										: 0;
+								return progress(
+									onProgress,
+									pct,
+									`${vid.fileName} — Chunk ${processed}/${totalChunks || "?"}`
+								);
+							})
+						);
+					}
+				}).pipe(Effect.catchAll(() => Effect.void));
+
+				// Run producer + N consumers concurrently
+				const consumers = Array.from(
+					{ length: ctx.concurrency },
+					() => consumer
+				);
+				yield* Effect.all([producer, ...consumers], {
+					concurrency: "unbounded",
+				});
+
+				// Batch upsert all embeddings to vector DB
+				if (pendingUpserts.length > 0) {
+					yield* ctx.vectorDb.upsertBatch(pendingUpserts).pipe(
+						Effect.tap(() => {
+							const embeddedIds = pendingUpserts.map((u) => u.chunkId);
+							return Effect.promise(() =>
+								db
+									.update(chunkTable)
+									.set({ embeddingStatus: "embedded" })
+									.where(inArray(chunkTable.id, embeddedIds))
+							);
+						}),
+						Effect.catchAll((err) =>
+							Effect.logError(`Batch upsert failed for ${vid.fileName}: ${err}`)
+						)
+					);
+				}
+
+				// Clean up the entire temp directory (covers leaked files on cancel/error)
+				if (tmpDir) {
+					yield* fs.remove(tmpDir, { recursive: true }).pipe(Effect.ignore);
+				}
 			});
 
 		const processVideo = (
@@ -487,7 +652,7 @@ export const ProcessorServiceLive = Layer.effect(
 					model: emb.model,
 				};
 
-				yield* progress(onProgress, 0, "Testing embedding API connection...");
+				yield* progress(onProgress, 0, "Testing embedding API...");
 				const preflight = yield* embedSvc.testConnection(embConfig);
 				if (!preflight.ok) {
 					yield* Effect.die(
@@ -505,6 +670,7 @@ export const ProcessorServiceLive = Layer.effect(
 					instruction: emb.instruction ?? undefined,
 					chunkDuration: emb.chunkDuration,
 					chunkOverlap: emb.chunkOverlap,
+					concurrency: emb.indexConcurrency,
 					downscaleFps: emb.downscaleFps,
 				};
 
@@ -515,7 +681,7 @@ export const ProcessorServiceLive = Layer.effect(
 						.where(eq(videoTable.id, videoId))
 				);
 
-				yield* progress(onProgress, 0, `Processing ${vid.fileName}...`);
+				yield* progress(onProgress, 0, `Indexing: ${vid.fileName}`);
 				yield* processVideoForIndexer(db, vid, indexer, onProgress);
 
 				const errorChunks = yield* Effect.promise(() =>
@@ -545,19 +711,103 @@ export const ProcessorServiceLive = Layer.effect(
 						.where(eq(videoTable.id, videoId))
 				);
 			}).pipe(
-				Effect.catchAllDefect((err) =>
-					Effect.promise(() => {
-						const errorMessage =
-							err instanceof Error ? err.message : String(err);
-						return db
-							.update(videoTable)
-							.set({ status: "error", errorMessage })
-							.where(eq(videoTable.id, videoId));
-					}).pipe(Effect.asVoid)
-				)
+				Effect.catchAllDefect((err) => {
+					const errorMessage = err instanceof Error ? err.message : String(err);
+					return Effect.logError(
+						`Video processing defect [${videoId}]: ${errorMessage}`
+					).pipe(
+						Effect.flatMap(() =>
+							Effect.promise(() =>
+								db
+									.update(videoTable)
+									.set({ status: "error", errorMessage })
+									.where(eq(videoTable.id, videoId))
+							)
+						),
+						Effect.asVoid
+					);
+				})
 			);
 
-		const indexLibrary = (
+		const indexSingleVideo = (
+			db: Db,
+			vid: typeof videoTable.$inferSelect,
+			indexer: IndexerContext,
+			onProgress?: ProgressFn
+		): Effect.Effect<void, JobCancelledError> =>
+			Effect.gen(function* () {
+				yield* checkCancelled(db, indexer.jobId);
+
+				yield* Effect.promise(() =>
+					db
+						.delete(chunkTable)
+						.where(
+							and(
+								eq(chunkTable.videoId, vid.id),
+								eq(chunkTable.indexerId, indexer.indexerId)
+							)
+						)
+				);
+
+				// Lazily resolve duration if not set during scan
+				if (vid.duration === null) {
+					const dur = yield* ffmpeg
+						.getVideoDuration(vid.filePath)
+						.pipe(
+							Effect.catchAll((err) =>
+								Effect.logWarning(
+									`Duration probe failed for ${vid.fileName}: ${err}`
+								).pipe(Effect.as(null))
+							)
+						);
+					if (dur !== null) {
+						yield* Effect.promise(() =>
+							db
+								.update(videoTable)
+								.set({ duration: dur })
+								.where(eq(videoTable.id, vid.id))
+						);
+					}
+				}
+
+				yield* Effect.promise(() =>
+					db
+						.update(videoTable)
+						.set({ status: "processing" })
+						.where(eq(videoTable.id, vid.id))
+				);
+
+				yield* processVideoForIndexer(db, vid, indexer, onProgress);
+
+				const errorChunks = yield* Effect.promise(() =>
+					db
+						.select({ id: chunkTable.id })
+						.from(chunkTable)
+						.where(
+							and(
+								eq(chunkTable.videoId, vid.id),
+								eq(chunkTable.indexerId, indexer.indexerId),
+								eq(chunkTable.embeddingStatus, "error")
+							)
+						)
+						.all()
+				);
+
+				yield* Effect.promise(() =>
+					db
+						.update(videoTable)
+						.set({
+							status: errorChunks.length > 0 ? "error" : "indexed",
+							errorMessage:
+								errorChunks.length > 0
+									? `${errorChunks.length} chunk(s) failed to embed`
+									: null,
+						})
+						.where(eq(videoTable.id, vid.id))
+				);
+			});
+
+		const resolveIndexer = (
 			db: Db,
 			vectorDbManager: VectorDbManagerShape,
 			libraryId: string,
@@ -565,10 +815,8 @@ export const ProcessorServiceLive = Layer.effect(
 			jobId?: string,
 			onProgress?: ProgressFn
 		): Effect.Effect<
-			void,
-			| LibraryNotFoundError
-			| LibraryEmbeddingNotConfiguredError
-			| JobCancelledError
+			IndexerContext,
+			LibraryNotFoundError | LibraryEmbeddingNotConfiguredError
 		> =>
 			Effect.gen(function* () {
 				const lib = yield* Effect.tryPromise({
@@ -606,7 +854,8 @@ export const ProcessorServiceLive = Layer.effect(
 					model: emb.model,
 				};
 
-				yield* progress(onProgress, 0, "Testing embedding API connection...");
+				yield* Effect.logInfo("Testing embedding API connection...");
+				yield* progress(onProgress, 0, "Testing embedding API...");
 				const preflight = yield* embedSvc.testConnection(embConfig);
 				if (!preflight.ok) {
 					yield* Effect.die(
@@ -615,12 +864,15 @@ export const ProcessorServiceLive = Layer.effect(
 						)
 					);
 				}
+				yield* Effect.logInfo("Embedding API connection OK");
 
+				yield* Effect.logInfo("Opening vector DB...");
 				const vectorDb = yield* vectorDbManager
 					.get(libraryId, emb.id, emb.dimensions)
 					.pipe(Effect.orDie);
+				yield* Effect.logInfo("Vector DB ready");
 
-				const indexer: IndexerContext = {
+				return {
 					indexerId: emb.id,
 					vectorDb,
 					jobId,
@@ -628,17 +880,37 @@ export const ProcessorServiceLive = Layer.effect(
 					instruction: emb.instruction ?? undefined,
 					chunkDuration: emb.chunkDuration,
 					chunkOverlap: emb.chunkOverlap,
+					concurrency: emb.indexConcurrency,
 					downscaleFps: emb.downscaleFps,
 				};
+			});
 
-				yield* Effect.promise(() =>
-					db
-						.update(libraryTable)
-						.set({ status: "scanning" })
-						.where(eq(libraryTable.id, libraryId))
+		const indexLibrary = (
+			db: Db,
+			vectorDbManager: VectorDbManagerShape,
+			libraryId: string,
+			indexerId: string,
+			jobId?: string,
+			onProgress?: ProgressFn
+		): Effect.Effect<
+			void,
+			| LibraryNotFoundError
+			| LibraryEmbeddingNotConfiguredError
+			| JobCancelledError
+		> =>
+			Effect.gen(function* () {
+				const indexer = yield* resolveIndexer(
+					db,
+					vectorDbManager,
+					libraryId,
+					indexerId,
+					jobId,
+					onProgress
 				);
 
-				yield* scanLibraryFolder(db, libraryId, onProgress);
+				yield* Effect.logInfo(
+					`Starting indexing for library ${libraryId} with indexer ${indexerId}`
+				);
 
 				yield* Effect.promise(() =>
 					db
@@ -655,73 +927,54 @@ export const ProcessorServiceLive = Layer.effect(
 						.all()
 				);
 
-				const videosToProcess = videos.filter((v) => v.status === "pending");
+				const videosToProcess = videos.filter(
+					(v) => v.status === "pending" || v.status === "error"
+				);
+
+				if (videosToProcess.length === 0) {
+					yield* Effect.logInfo("No pending videos to index");
+					yield* progress(onProgress, 100, "No pending videos to index.");
+					yield* Effect.promise(() =>
+						db
+							.update(libraryTable)
+							.set({ status: "ready" })
+							.where(eq(libraryTable.id, libraryId))
+					);
+					return;
+				}
+
+				yield* Effect.logInfo(
+					`Indexing ${videosToProcess.length} videos (concurrency: ${indexer.concurrency})`
+				);
+
 				let processed = 0;
+				const total = videosToProcess.length;
 
 				for (const vid of videosToProcess) {
-					yield* checkCancelled(db, jobId);
-
-					yield* Effect.promise(() =>
-						db
-							.delete(chunkTable)
-							.where(
-								and(
-									eq(chunkTable.videoId, vid.id),
-									eq(chunkTable.indexerId, indexer.indexerId)
-								)
-							)
-					);
-
-					yield* Effect.promise(() =>
-						db
-							.update(videoTable)
-							.set({ status: "processing" })
-							.where(eq(videoTable.id, vid.id))
+					yield* Effect.logInfo(
+						`Indexing video ${processed + 1}/${total}: ${vid.fileName}`
 					);
 
 					const vidProgress: ProgressFn | undefined = onProgress
 						? (pct, msg) => {
 								const overallPct = Math.round(
-									((processed + pct / 100) / videosToProcess.length) * 100
+									((processed + pct / 100) / total) * 100
 								);
 								return progress(
 									onProgress,
 									overallPct,
-									`Video ${processed + 1}/${videosToProcess.length}: ${msg}`
+									`(${processed + 1}/${total}) ${msg}`
 								);
 							}
 						: undefined;
 
-					yield* processVideoForIndexer(db, vid, indexer, vidProgress);
-
-					const errorChunks = yield* Effect.promise(() =>
-						db
-							.select({ id: chunkTable.id })
-							.from(chunkTable)
-							.where(
-								and(
-									eq(chunkTable.videoId, vid.id),
-									eq(chunkTable.indexerId, indexer.indexerId),
-									eq(chunkTable.embeddingStatus, "error")
-								)
-							)
-							.all()
-					);
-
-					yield* Effect.promise(() =>
-						db
-							.update(videoTable)
-							.set({
-								status: errorChunks.length > 0 ? "error" : "indexed",
-								errorMessage:
-									errorChunks.length > 0
-										? `${errorChunks.length} chunk(s) failed to embed`
-										: null,
-							})
-							.where(eq(videoTable.id, vid.id))
-					);
+					yield* indexSingleVideo(db, vid, indexer, vidProgress);
 					processed++;
 				}
+
+				yield* Effect.logInfo(
+					`Indexing complete: ${processed} videos processed`
+				);
 
 				yield* Effect.promise(() =>
 					db
@@ -729,8 +982,6 @@ export const ProcessorServiceLive = Layer.effect(
 						.set({ status: "ready" })
 						.where(eq(libraryTable.id, libraryId))
 				);
-
-				yield* progress(onProgress, 100, "Indexing complete.");
 			});
 
 		return { scanLibraryFolder, processVideo, indexLibrary };
