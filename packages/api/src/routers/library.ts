@@ -21,6 +21,20 @@ import { z } from "zod";
 import { runEffect } from "../effect-trpc";
 import { protectedProcedure, router } from "../index";
 
+const validateFolderPaths = (folderPaths: string[]) =>
+	Effect.gen(function* () {
+		const fsService = yield* FileSystem.FileSystem;
+		for (const folderPath of folderPaths) {
+			yield* fsService
+				.access(folderPath)
+				.pipe(
+					Effect.catchAll(() =>
+						Effect.fail(new FolderNotAccessibleError({ path: folderPath }))
+					)
+				);
+		}
+	});
+
 export const libraryRouter = router({
 	list: protectedProcedure.query(({ ctx }) =>
 		runEffect(
@@ -64,6 +78,9 @@ export const libraryRouter = router({
 				name: z.string().min(1),
 				folderPaths: z.array(z.string().min(1)).min(1),
 				scanConcurrency: z.number().min(1).max(16).default(3),
+				excludePatterns: z.array(z.string()).default([]),
+				scanModifiedAfter: z.string().datetime().nullable().optional(),
+				scanModifiedBefore: z.string().datetime().nullable().optional(),
 			})
 		)
 		.mutation(({ ctx, input }) =>
@@ -71,19 +88,7 @@ export const libraryRouter = router({
 				ctx.runtime,
 				Effect.gen(function* () {
 					const db = yield* DbService;
-
-					const fsService = yield* FileSystem.FileSystem;
-					for (const folderPath of input.folderPaths) {
-						yield* fsService.access(folderPath).pipe(
-							Effect.catchAll(() =>
-								Effect.fail(
-									new FolderNotAccessibleError({
-										path: folderPath,
-									})
-								)
-							)
-						);
-					}
+					yield* validateFolderPaths(input.folderPaths);
 
 					const id = nanoid();
 					yield* Effect.promise(() =>
@@ -92,6 +97,13 @@ export const libraryRouter = router({
 							name: input.name,
 							folderPaths: JSON.stringify(input.folderPaths),
 							scanConcurrency: input.scanConcurrency,
+							excludePatterns: JSON.stringify(input.excludePatterns),
+							scanModifiedAfter: input.scanModifiedAfter
+								? new Date(input.scanModifiedAfter)
+								: null,
+							scanModifiedBefore: input.scanModifiedBefore
+								? new Date(input.scanModifiedBefore)
+								: null,
 						})
 					);
 
@@ -107,6 +119,9 @@ export const libraryRouter = router({
 				name: z.string().min(1).optional(),
 				folderPaths: z.array(z.string().min(1)).min(1).optional(),
 				scanConcurrency: z.number().min(1).max(16).optional(),
+				excludePatterns: z.array(z.string()).optional(),
+				scanModifiedAfter: z.string().datetime().nullable().optional(),
+				scanModifiedBefore: z.string().datetime().nullable().optional(),
 			})
 		)
 		.mutation(({ ctx, input }) =>
@@ -121,22 +136,24 @@ export const libraryRouter = router({
 						set.name = fields.name;
 					}
 					if (fields.folderPaths !== undefined) {
-						const fsService = yield* FileSystem.FileSystem;
-						for (const folderPath of fields.folderPaths) {
-							yield* fsService.access(folderPath).pipe(
-								Effect.catchAll(() =>
-									Effect.fail(
-										new FolderNotAccessibleError({
-											path: folderPath,
-										})
-									)
-								)
-							);
-						}
+						yield* validateFolderPaths(fields.folderPaths);
 						set.folderPaths = JSON.stringify(fields.folderPaths);
 					}
 					if (fields.scanConcurrency !== undefined) {
 						set.scanConcurrency = fields.scanConcurrency;
+					}
+					if (fields.excludePatterns !== undefined) {
+						set.excludePatterns = JSON.stringify(fields.excludePatterns);
+					}
+					if (fields.scanModifiedAfter !== undefined) {
+						set.scanModifiedAfter = fields.scanModifiedAfter
+							? new Date(fields.scanModifiedAfter)
+							: null;
+					}
+					if (fields.scanModifiedBefore !== undefined) {
+						set.scanModifiedBefore = fields.scanModifiedBefore
+							? new Date(fields.scanModifiedBefore)
+							: null;
 					}
 
 					yield* Effect.promise(() =>

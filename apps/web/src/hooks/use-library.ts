@@ -1,10 +1,13 @@
 import { createContext, useContext } from "react";
 
 export interface LibraryData {
+	excludePatterns: string;
 	folderPaths: string;
 	id: string;
 	name: string;
 	scanConcurrency: number;
+	scanModifiedAfter: string | null;
+	scanModifiedBefore: string | null;
 	status: string;
 	videoCount: number;
 }

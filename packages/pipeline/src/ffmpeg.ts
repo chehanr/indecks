@@ -11,13 +11,23 @@ const MP4_EXT = /\.mp4$/;
 const FREEZE_DURATION_RE = /freeze_duration:\s*([\d.]+)/;
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm"]);
 
-const findVideos = (dir: string): Effect.Effect<string[]> =>
+const findVideos = (
+	dir: string,
+	excludePatterns: string[] = []
+): Effect.Effect<string[]> =>
 	Effect.promise(async () => {
+		const regexes = excludePatterns.map((p) => new RegExp(p));
 		const entries = await readdir(dir, { recursive: true });
 		return entries
 			.filter((entry) => {
 				const ext = entry.slice(entry.lastIndexOf(".")).toLowerCase();
-				return VIDEO_EXTENSIONS.has(ext);
+				if (!VIDEO_EXTENSIONS.has(ext)) {
+					return false;
+				}
+				if (regexes.some((re) => re.test(entry))) {
+					return false;
+				}
+				return true;
 			})
 			.map((entry) => join(dir, entry));
 	});
@@ -176,7 +186,10 @@ export interface FFmpegServiceShape {
 		duration: number,
 		threshold?: number
 	) => Effect.Effect<boolean>;
-	readonly scanDirectory: (dirPath: string) => Effect.Effect<string[]>;
+	readonly scanDirectory: (
+		dirPath: string,
+		excludePatterns?: string[]
+	) => Effect.Effect<string[]>;
 }
 
 export class FFmpegService extends Context.Tag("FFmpegService")<
@@ -449,10 +462,10 @@ export const FFmpegServiceLive = Layer.effect(
 					return freezeDuration / duration >= threshold;
 				}),
 
-			scanDirectory: (dirPath) =>
+			scanDirectory: (dirPath, excludePatterns) =>
 				Effect.gen(function* () {
 					const absDir = resolve(dirPath);
-					const videos = yield* findVideos(absDir);
+					const videos = yield* findVideos(absDir, excludePatterns);
 					videos.sort();
 					return videos;
 				}).pipe(

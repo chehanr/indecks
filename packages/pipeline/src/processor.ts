@@ -103,13 +103,14 @@ export const ProcessorServiceLive = Layer.effect(
 		// Phase 1: Walk filesystem, collect video paths. No DB, no ffprobe.
 		const walkFolders = (
 			folderPaths: string[],
+			excludePatterns: string[],
 			onProgress?: ProgressFn
 		): Effect.Effect<string[]> =>
 			Effect.gen(function* () {
 				const all: string[] = [];
 				for (const folder of folderPaths) {
 					yield* progress(onProgress, -1, `Scanning: ${folder}`);
-					const paths = yield* ffmpeg.scanDirectory(folder);
+					const paths = yield* ffmpeg.scanDirectory(folder, excludePatterns);
 					all.push(...paths);
 				}
 				return [...new Set(all)];
@@ -269,7 +270,33 @@ export const ProcessorServiceLive = Layer.effect(
 
 				// Phase 1: Walk filesystem (indefinite progress)
 				const folderPaths: string[] = JSON.parse(lib.folderPaths);
-				const videoPaths = yield* walkFolders(folderPaths, onProgress);
+				const excludePatterns: string[] = JSON.parse(
+					lib.excludePatterns ?? "[]"
+				);
+				let videoPaths = yield* walkFolders(
+					folderPaths,
+					excludePatterns,
+					onProgress
+				);
+
+				// Filter by modification time range
+				const { scanModifiedAfter, scanModifiedBefore } = lib;
+				if (scanModifiedAfter || scanModifiedBefore) {
+					videoPaths = yield* Effect.sync(() => {
+						const filtered: string[] = [];
+						for (const filePath of videoPaths) {
+							const mtime = Bun.file(filePath).lastModified;
+							if (scanModifiedAfter && mtime < scanModifiedAfter.getTime()) {
+								continue;
+							}
+							if (scanModifiedBefore && mtime > scanModifiedBefore.getTime()) {
+								continue;
+							}
+							filtered.push(filePath);
+						}
+						return filtered;
+					});
+				}
 
 				// Load existing videos from DB
 				const existingVideos = yield* Effect.promise(() =>

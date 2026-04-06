@@ -20,14 +20,19 @@ export function CreateLibraryDialog() {
 	const [open, setOpen] = useState(false);
 	const [name, setName] = useState("");
 	const [folderPaths, setFolderPaths] = useState([""]);
+	const [excludePatterns, setExcludePatterns] = useState<string[]>([]);
 
 	const createMutation = useMutation({
-		mutationFn: (input: { name: string; folderPaths: string[] }) =>
-			trpcClient.library.create.mutate(input),
+		mutationFn: (input: {
+			name: string;
+			folderPaths: string[];
+			excludePatterns: string[];
+		}) => trpcClient.library.create.mutate(input),
 		onSuccess: () => {
 			toast.success("Library created");
 			setName("");
 			setFolderPaths([""]);
+			setExcludePatterns([]);
 			setOpen(false);
 			queryClient.invalidateQueries({ queryKey: [["library", "list"]] });
 		},
@@ -60,7 +65,11 @@ export function CreateLibraryDialog() {
 					onSubmit={(e) => {
 						e.preventDefault();
 						if (canSubmit) {
-							createMutation.mutate({ name, folderPaths: validPaths });
+							createMutation.mutate({
+								name,
+								folderPaths: validPaths,
+								excludePatterns: excludePatterns.filter((p) => p.trim()),
+							});
 						}
 					}}
 				>
@@ -112,6 +121,49 @@ export function CreateLibraryDialog() {
 									<Plus className="size-4" />
 									Add Path
 								</Button>
+							</div>
+						</Field>
+						<Field>
+							<FieldLabel>Exclude Patterns</FieldLabel>
+							<div className="space-y-2">
+								{excludePatterns.map((pattern, i) => (
+									// biome-ignore lint/suspicious/noArrayIndexKey: editable input list
+									<div className="flex gap-2" key={i}>
+										<Input
+											onChange={(e) => {
+												const next = [...excludePatterns];
+												next[i] = e.target.value;
+												setExcludePatterns(next);
+											}}
+											placeholder="e.g. ^_ or \.DS_Store"
+											value={pattern}
+										/>
+										<Button
+											onClick={() =>
+												setExcludePatterns(
+													excludePatterns.filter((_, j) => j !== i)
+												)
+											}
+											size="icon"
+											type="button"
+											variant="ghost"
+										>
+											<Trash2 className="size-4" />
+										</Button>
+									</div>
+								))}
+								<Button
+									onClick={() => setExcludePatterns([...excludePatterns, ""])}
+									size="sm"
+									type="button"
+									variant="outline"
+								>
+									<Plus className="size-4" />
+									Add Pattern
+								</Button>
+								<p className="text-muted-foreground text-xs">
+									Regex patterns matched against relative file paths.
+								</p>
 							</div>
 						</Field>
 						<Button
