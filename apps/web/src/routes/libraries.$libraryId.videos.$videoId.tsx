@@ -11,6 +11,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";
 
 import { BreadcrumbPortal } from "@/components/breadcrumb-slot";
+import { useLibrary } from "@/routes/libraries.$libraryId";
 import { trpc } from "@/utils/trpc";
 
 const videoSearchSchema = z.object({
@@ -33,14 +34,10 @@ function formatTime(seconds: number): string {
 function VideoDetailPage() {
 	const { libraryId, videoId } = Route.useParams();
 	const { start } = Route.useSearch();
+	const library = useLibrary();
 
-	const libraryQuery = useQuery(
-		trpc.library.get.queryOptions({ id: libraryId })
-	);
 	const videoQuery = useQuery(trpc.library.video.queryOptions({ id: videoId }));
-
 	const video = videoQuery.data;
-	const libraryName = libraryQuery.data?.name ?? "...";
 
 	if (videoQuery.isLoading) {
 		return <p className="text-muted-foreground text-sm">Loading...</p>;
@@ -67,7 +64,7 @@ function VideoDetailPage() {
 									<Link params={{ libraryId }} to="/libraries/$libraryId" />
 								}
 							>
-								{libraryName}
+								{library.name}
 							</BreadcrumbLink>
 						</BreadcrumbItem>
 						<BreadcrumbSeparator />

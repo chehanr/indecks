@@ -28,7 +28,7 @@ import { toast } from "sonner";
 import { useDebouncedCallback } from "use-debounce";
 
 import { BreadcrumbPortal } from "@/components/breadcrumb-slot";
-import { useJobTracking } from "@/routes/libraries.$libraryId";
+import { useJobTracking, useLibrary } from "@/routes/libraries.$libraryId";
 import { queryClient, trpc, trpcClient } from "@/utils/trpc";
 
 export const Route = createFileRoute("/libraries/$libraryId/videos/")({
@@ -180,12 +180,8 @@ const DEFAULT_PAGE_SIZE = 20;
 
 function VideosPage() {
 	const { libraryId } = Route.useParams();
+	const library = useLibrary();
 	const { trackJob } = useJobTracking();
-
-	const libraryQuery = useQuery(
-		trpc.library.get.queryOptions({ id: libraryId })
-	);
-	const libraryName = libraryQuery.data?.name ?? "...";
 
 	const [searchQuery, setSearchQuery] = useQueryState(
 		"q",
@@ -271,7 +267,7 @@ function VideosPage() {
 									<Link params={{ libraryId }} to="/libraries/$libraryId" />
 								}
 							>
-								{libraryName}
+								{library.name}
 							</BreadcrumbLink>
 						</BreadcrumbItem>
 						<BreadcrumbSeparator />

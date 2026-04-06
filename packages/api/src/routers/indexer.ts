@@ -30,30 +30,6 @@ export const indexerRouter = router({
 			)
 		),
 
-	get: protectedProcedure
-		.input(z.object({ id: z.string() }))
-		.query(({ ctx, input }) =>
-			runEffect(
-				ctx.runtime,
-				Effect.gen(function* () {
-					const db = yield* DbService;
-					const row = yield* Effect.promise(() =>
-						db
-							.select()
-							.from(indexerTable)
-							.where(eq(indexerTable.id, input.id))
-							.get()
-					);
-					if (!row) {
-						return yield* new IndexerNotFoundError({
-							indexerId: input.id,
-						});
-					}
-					return row;
-				})
-			)
-		),
-
 	create: protectedProcedure
 		.input(
 			z.object({

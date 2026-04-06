@@ -20,6 +20,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useDebouncedCallback } from "use-debounce";
 
 import { BreadcrumbPortal } from "@/components/breadcrumb-slot";
+import { useLibrary } from "@/routes/libraries.$libraryId";
 import { trpc } from "@/utils/trpc";
 
 export const Route = createFileRoute("/libraries/$libraryId/")({
@@ -292,11 +293,7 @@ const DEFAULT_PAGE_SIZE = 20;
 
 function SearchPage() {
 	const { libraryId } = Route.useParams();
-
-	const libraryQuery = useQuery(
-		trpc.library.get.queryOptions({ id: libraryId })
-	);
-	const libraryName = libraryQuery.data?.name ?? "...";
+	const library = useLibrary();
 
 	const [searchQuery, setSearchQuery] = useQueryState(
 		"q",
@@ -363,7 +360,7 @@ function SearchPage() {
 									<Link params={{ libraryId }} to="/libraries/$libraryId" />
 								}
 							>
-								{libraryName}
+								{library.name}
 							</BreadcrumbLink>
 						</BreadcrumbItem>
 						<BreadcrumbSeparator />

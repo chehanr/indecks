@@ -44,20 +44,37 @@ export const Route = createFileRoute("/libraries/$libraryId")({
 	},
 });
 
-// --- Job Tracking Context ---
+// --- Library Layout Context ---
 
-interface JobTrackingContextValue {
+interface LibraryContextValue {
+	library: {
+		id: string;
+		name: string;
+		folderPaths: string;
+		status: string;
+		videoCount: number;
+		scanConcurrency: number;
+	};
 	trackedJobIds: string[];
 	trackJob: (jobId: string) => void;
 }
 
-const JobTrackingContext = createContext<JobTrackingContextValue>({
-	trackedJobIds: [],
-	trackJob: () => undefined,
-});
+const LibraryContext = createContext<LibraryContextValue | null>(null);
+
+export function useLibrary() {
+	const ctx = useContext(LibraryContext);
+	if (!ctx) {
+		throw new Error("useLibrary must be used within LibraryLayout");
+	}
+	return ctx.library;
+}
 
 export function useJobTracking() {
-	return useContext(JobTrackingContext);
+	const ctx = useContext(LibraryContext);
+	if (!ctx) {
+		throw new Error("useJobTracking must be used within LibraryLayout");
+	}
+	return { trackedJobIds: ctx.trackedJobIds, trackJob: ctx.trackJob };
 }
 
 // --- Indexing Progress ---
@@ -203,7 +220,7 @@ function LibraryLayout() {
 	}
 
 	return (
-		<JobTrackingContext value={{ trackedJobIds, trackJob }}>
+		<LibraryContext value={{ library, trackedJobIds, trackJob }}>
 			<BreadcrumbPortal>
 				<Breadcrumb>
 					<BreadcrumbList>
@@ -253,6 +270,6 @@ function LibraryLayout() {
 
 				<Outlet />
 			</div>
-		</JobTrackingContext>
+		</LibraryContext>
 	);
 }

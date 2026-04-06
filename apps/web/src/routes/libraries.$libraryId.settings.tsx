@@ -47,7 +47,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { BreadcrumbPortal } from "@/components/breadcrumb-slot";
-import { useJobTracking } from "@/routes/libraries.$libraryId";
+import { useJobTracking, useLibrary } from "@/routes/libraries.$libraryId";
 import { queryClient, trpc, trpcClient } from "@/utils/trpc";
 
 export const Route = createFileRoute("/libraries/$libraryId/settings")({
@@ -756,10 +756,7 @@ function SettingsPage() {
 	const navigate = useNavigate();
 	const { trackJob } = useJobTracking();
 
-	const libraryQuery = useQuery(
-		trpc.library.get.queryOptions({ id: libraryId })
-	);
-	const libraryName = libraryQuery.data?.name ?? "...";
+	const library = useLibrary();
 	const indexersQuery = useQuery(trpc.indexer.list.queryOptions({ libraryId }));
 
 	const deleteMutation = useMutation({
@@ -790,7 +787,7 @@ function SettingsPage() {
 									<Link params={{ libraryId }} to="/libraries/$libraryId" />
 								}
 							>
-								{libraryName}
+								{library.name}
 							</BreadcrumbLink>
 						</BreadcrumbItem>
 						<BreadcrumbSeparator />
@@ -804,7 +801,7 @@ function SettingsPage() {
 			<div className="space-y-6">
 				<div className="space-y-4">
 					<h2 className="font-medium text-sm">Library</h2>
-					{libraryQuery.data && <EditLibraryForm library={libraryQuery.data} />}
+					{library && <EditLibraryForm library={library} />}
 				</div>
 
 				<Separator />
@@ -848,9 +845,7 @@ function SettingsPage() {
 						/>
 						<AlertDialogContent>
 							<AlertDialogHeader>
-								<AlertDialogTitle>
-									Delete {libraryQuery.data?.name}?
-								</AlertDialogTitle>
+								<AlertDialogTitle>Delete {library.name}?</AlertDialogTitle>
 								<AlertDialogDescription>
 									This will permanently delete the library, all videos,
 									indexers, and vector data.
