@@ -16,7 +16,6 @@ import { Route as LibrariesLibraryIdRouteImport } from './routes/libraries.$libr
 import { Route as LibrariesLibraryIdIndexRouteImport } from './routes/libraries.$libraryId.index'
 import { Route as LibrariesLibraryIdVideosRouteImport } from './routes/libraries.$libraryId.videos'
 import { Route as LibrariesLibraryIdSettingsRouteImport } from './routes/libraries.$libraryId.settings'
-import { Route as LibrariesLibraryIdSearchRouteImport } from './routes/libraries.$libraryId.search'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -55,19 +54,12 @@ const LibrariesLibraryIdSettingsRoute =
     path: '/settings',
     getParentRoute: () => LibrariesLibraryIdRoute,
   } as any)
-const LibrariesLibraryIdSearchRoute =
-  LibrariesLibraryIdSearchRouteImport.update({
-    id: '/search',
-    path: '/search',
-    getParentRoute: () => LibrariesLibraryIdRoute,
-  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/libraries/$libraryId': typeof LibrariesLibraryIdRouteWithChildren
   '/libraries/': typeof LibrariesIndexRoute
-  '/libraries/$libraryId/search': typeof LibrariesLibraryIdSearchRoute
   '/libraries/$libraryId/settings': typeof LibrariesLibraryIdSettingsRoute
   '/libraries/$libraryId/videos': typeof LibrariesLibraryIdVideosRoute
   '/libraries/$libraryId/': typeof LibrariesLibraryIdIndexRoute
@@ -76,7 +68,6 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/libraries': typeof LibrariesIndexRoute
-  '/libraries/$libraryId/search': typeof LibrariesLibraryIdSearchRoute
   '/libraries/$libraryId/settings': typeof LibrariesLibraryIdSettingsRoute
   '/libraries/$libraryId/videos': typeof LibrariesLibraryIdVideosRoute
   '/libraries/$libraryId': typeof LibrariesLibraryIdIndexRoute
@@ -87,7 +78,6 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/libraries/$libraryId': typeof LibrariesLibraryIdRouteWithChildren
   '/libraries/': typeof LibrariesIndexRoute
-  '/libraries/$libraryId/search': typeof LibrariesLibraryIdSearchRoute
   '/libraries/$libraryId/settings': typeof LibrariesLibraryIdSettingsRoute
   '/libraries/$libraryId/videos': typeof LibrariesLibraryIdVideosRoute
   '/libraries/$libraryId/': typeof LibrariesLibraryIdIndexRoute
@@ -99,7 +89,6 @@ export interface FileRouteTypes {
     | '/login'
     | '/libraries/$libraryId'
     | '/libraries/'
-    | '/libraries/$libraryId/search'
     | '/libraries/$libraryId/settings'
     | '/libraries/$libraryId/videos'
     | '/libraries/$libraryId/'
@@ -108,7 +97,6 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/libraries'
-    | '/libraries/$libraryId/search'
     | '/libraries/$libraryId/settings'
     | '/libraries/$libraryId/videos'
     | '/libraries/$libraryId'
@@ -118,7 +106,6 @@ export interface FileRouteTypes {
     | '/login'
     | '/libraries/$libraryId'
     | '/libraries/'
-    | '/libraries/$libraryId/search'
     | '/libraries/$libraryId/settings'
     | '/libraries/$libraryId/videos'
     | '/libraries/$libraryId/'
@@ -182,25 +169,16 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LibrariesLibraryIdSettingsRouteImport
       parentRoute: typeof LibrariesLibraryIdRoute
     }
-    '/libraries/$libraryId/search': {
-      id: '/libraries/$libraryId/search'
-      path: '/search'
-      fullPath: '/libraries/$libraryId/search'
-      preLoaderRoute: typeof LibrariesLibraryIdSearchRouteImport
-      parentRoute: typeof LibrariesLibraryIdRoute
-    }
   }
 }
 
 interface LibrariesLibraryIdRouteChildren {
-  LibrariesLibraryIdSearchRoute: typeof LibrariesLibraryIdSearchRoute
   LibrariesLibraryIdSettingsRoute: typeof LibrariesLibraryIdSettingsRoute
   LibrariesLibraryIdVideosRoute: typeof LibrariesLibraryIdVideosRoute
   LibrariesLibraryIdIndexRoute: typeof LibrariesLibraryIdIndexRoute
 }
 
 const LibrariesLibraryIdRouteChildren: LibrariesLibraryIdRouteChildren = {
-  LibrariesLibraryIdSearchRoute: LibrariesLibraryIdSearchRoute,
   LibrariesLibraryIdSettingsRoute: LibrariesLibraryIdSettingsRoute,
   LibrariesLibraryIdVideosRoute: LibrariesLibraryIdVideosRoute,
   LibrariesLibraryIdIndexRoute: LibrariesLibraryIdIndexRoute,
