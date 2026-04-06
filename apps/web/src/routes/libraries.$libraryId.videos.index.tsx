@@ -1,4 +1,3 @@
-import { Badge } from "@indecks/ui/components/badge";
 import { Button } from "@indecks/ui/components/button";
 import {
 	Dialog,
@@ -12,8 +11,9 @@ import {
 	NativeSelectOption,
 } from "@indecks/ui/components/native-select";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
-import { FolderSearch } from "lucide-react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { ChevronLeft, ChevronRight, FolderSearch } from "lucide-react";
+import { parseAsInteger, useQueryState } from "nuqs";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -23,23 +23,6 @@ import { queryClient, trpc, trpcClient } from "@/utils/trpc";
 export const Route = createFileRoute("/libraries/$libraryId/videos/")({
 	component: VideosPage,
 });
-
-// --- Video Status ---
-
-const videoStatusVariant: Record<
-	string,
-	"default" | "outline" | "destructive" | "secondary"
-> = {
-	indexed: "default",
-	processing: "outline",
-	error: "destructive",
-};
-
-function VideoStatusBadge({ status }: { status: string }) {
-	return (
-		<Badge variant={videoStatusVariant[status] ?? "secondary"}>{status}</Badge>
-	);
-}
 
 // --- Index Video Dialog ---
 
@@ -128,15 +111,15 @@ function IndexVideoDialog({
 // --- Video Row ---
 
 function VideoRow({
+	libraryId,
 	video,
 	indexers,
 	onJobStarted,
 }: {
+	libraryId: string;
 	video: {
 		id: string;
 		fileName: string;
-		duration: number | null;
-		status: string;
 		indexedBy: string[];
 	};
 	indexers: {
@@ -151,13 +134,14 @@ function VideoRow({
 	return (
 		<div className="flex items-center justify-between py-2">
 			<div className="min-w-0 flex-1">
-				<p className="truncate font-medium text-sm">{video.fileName}</p>
+				<Link
+					className="block truncate font-medium text-sm hover:underline"
+					params={{ libraryId, videoId: video.id }}
+					to="/libraries/$libraryId/videos/$videoId"
+				>
+					{video.fileName}
+				</Link>
 				<div className="flex items-center gap-2">
-					{video.duration != null && (
-						<span className="text-muted-foreground text-xs">
-							{Math.round(video.duration)}s
-						</span>
-					)}
 					{video.indexedBy.length > 0 && (
 						<span className="text-muted-foreground text-xs">
 							indexed by: {video.indexedBy.join(", ")}
@@ -173,7 +157,6 @@ function VideoRow({
 						videoId={video.id}
 					/>
 				)}
-				<VideoStatusBadge status={video.status} />
 			</div>
 		</div>
 	);
@@ -181,14 +164,37 @@ function VideoRow({
 
 // --- Videos Page ---
 
+const PAGE_SIZE_OPTIONS = [20, 40, 60, 100] as const;
+const DEFAULT_PAGE_SIZE = 20;
+
 function VideosPage() {
 	const { libraryId } = Route.useParams();
 	const { trackJob } = useJobTracking();
 
+	const [page, setPage] = useQueryState("page", parseAsInteger.withDefault(1));
+	const [pageSize, setPageSize] = useQueryState(
+		"size",
+		parseAsInteger.withDefault(DEFAULT_PAGE_SIZE)
+	);
+
+	const effectivePageSize = PAGE_SIZE_OPTIONS.includes(
+		pageSize as (typeof PAGE_SIZE_OPTIONS)[number]
+	)
+		? pageSize
+		: DEFAULT_PAGE_SIZE;
+
+	const offset = (page - 1) * effectivePageSize;
+
 	const libraryQuery = useQuery(
 		trpc.library.get.queryOptions({ id: libraryId })
 	);
-	const videosQuery = useQuery(trpc.library.videos.queryOptions({ libraryId }));
+	const videosQuery = useQuery(
+		trpc.library.videos.queryOptions({
+			libraryId,
+			limit: effectivePageSize,
+			offset,
+		})
+	);
 	const indexersQuery = useQuery(trpc.indexer.list.queryOptions({ libraryId }));
 	const indexers = (indexersQuery.data ?? []).map((e) => ({
 		id: e.id,
@@ -197,6 +203,10 @@ function VideosPage() {
 		dimensions: e.dimensions,
 		isDefault: e.isDefault,
 	}));
+
+	const total = videosQuery.data?.total ?? 0;
+	const totalPages = Math.max(1, Math.ceil(total / effectivePageSize));
+	const videos = videosQuery.data?.items ?? [];
 
 	const scanMutation = useMutation({
 		mutationFn: () => trpcClient.library.startScan.mutate({ id: libraryId }),
@@ -210,40 +220,88 @@ function VideosPage() {
 		},
 	});
 
+	const handlePageSizeChange = (size: number) => {
+		setPageSize(size === DEFAULT_PAGE_SIZE ? null : size);
+		setPage(null);
+	};
+
 	return (
 		<div className="space-y-4">
 			<div className="flex items-center justify-between">
 				<h2 className="font-medium text-sm">
 					{libraryQuery.data?.videoCount ?? 0} videos
 				</h2>
-				<Button
-					disabled={scanMutation.isPending}
-					onClick={() => scanMutation.mutate()}
-					size="sm"
-					variant="outline"
-				>
-					<FolderSearch className="size-4" />
-					{scanMutation.isPending ? "Scanning..." : "Scan"}
-				</Button>
+				<div className="flex items-center gap-2">
+					<NativeSelect
+						className="w-auto"
+						onChange={(e) =>
+							handlePageSizeChange(Number.parseInt(e.target.value, 10))
+						}
+						value={effectivePageSize}
+					>
+						{PAGE_SIZE_OPTIONS.map((size) => (
+							<NativeSelectOption key={size} value={size}>
+								{size} per page
+							</NativeSelectOption>
+						))}
+					</NativeSelect>
+					<Button
+						disabled={scanMutation.isPending}
+						onClick={() => scanMutation.mutate()}
+						size="sm"
+						variant="outline"
+					>
+						<FolderSearch className="size-4" />
+						{scanMutation.isPending ? "Scanning..." : "Scan"}
+					</Button>
+				</div>
 			</div>
+
 			{videosQuery.isLoading && (
 				<p className="text-muted-foreground text-sm">Loading videos...</p>
 			)}
-			{videosQuery.data?.length === 0 && (
+			{videos.length === 0 && !videosQuery.isLoading && (
 				<p className="text-muted-foreground text-sm">
-					No videos found. Add an indexer and start indexing.
+					No videos found. Scan your library to discover videos.
 				</p>
 			)}
-			{videosQuery.data && videosQuery.data.length > 0 && (
+			{videos.length > 0 && (
 				<div className="divide-y">
-					{videosQuery.data.map((video) => (
+					{videos.map((video) => (
 						<VideoRow
 							indexers={indexers}
 							key={video.id}
+							libraryId={libraryId}
 							onJobStarted={trackJob}
 							video={video}
 						/>
 					))}
+				</div>
+			)}
+
+			{totalPages > 1 && (
+				<div className="flex items-center justify-between">
+					<span className="text-muted-foreground text-sm">
+						Page {page} of {totalPages}
+					</span>
+					<div className="flex items-center gap-1">
+						<Button
+							disabled={page <= 1}
+							onClick={() => setPage(page - 1 <= 1 ? null : page - 1)}
+							size="sm"
+							variant="outline"
+						>
+							<ChevronLeft className="size-4" />
+						</Button>
+						<Button
+							disabled={page >= totalPages}
+							onClick={() => setPage(page + 1)}
+							size="sm"
+							variant="outline"
+						>
+							<ChevronRight className="size-4" />
+						</Button>
+					</div>
 				</div>
 			)}
 		</div>

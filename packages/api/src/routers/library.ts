@@ -13,7 +13,7 @@ import {
 } from "@indecks/pipeline/errors";
 import { ThumbnailCacheService } from "@indecks/pipeline/thumbnail-cache";
 import { VectorDbManagerService } from "@indecks/vector";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, count, eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -422,17 +422,35 @@ export const libraryRouter = router({
 		),
 
 	videos: protectedProcedure
-		.input(z.object({ libraryId: z.string() }))
+		.input(
+			z.object({
+				libraryId: z.string(),
+				limit: z.number().min(1).max(100).default(20),
+				offset: z.number().min(0).default(0),
+			})
+		)
 		.query(({ ctx, input }) =>
 			runEffect(
 				ctx.runtime,
 				Effect.gen(function* () {
 					const db = yield* DbService;
+
+					const [totalResult] = yield* Effect.promise(() =>
+						db
+							.select({ count: count() })
+							.from(videoTable)
+							.where(eq(videoTable.libraryId, input.libraryId))
+							.all()
+					);
+					const total = totalResult?.count ?? 0;
+
 					const videos = yield* Effect.promise(() =>
 						db
 							.select()
 							.from(videoTable)
 							.where(eq(videoTable.libraryId, input.libraryId))
+							.limit(input.limit)
+							.offset(input.offset)
 							.all()
 					);
 
@@ -469,10 +487,13 @@ export const libraryRouter = router({
 						videoIndexers.set(row.videoId, list);
 					}
 
-					return videos.map((v) => ({
-						...v,
-						indexedBy: videoIndexers.get(v.id) ?? [],
-					}));
+					return {
+						items: videos.map((v) => ({
+							...v,
+							indexedBy: videoIndexers.get(v.id) ?? [],
+						})),
+						total,
+					};
 				})
 			)
 		),
