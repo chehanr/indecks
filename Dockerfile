@@ -12,6 +12,7 @@ COPY packages/config/package.json packages/config/
 COPY packages/db/package.json packages/db/
 COPY packages/env/package.json packages/env/
 COPY packages/pipeline/package.json packages/pipeline/
+COPY packages/state/package.json packages/state/
 COPY packages/ui/package.json packages/ui/
 COPY packages/vector/package.json packages/vector/
 RUN bun install --frozen-lockfile
