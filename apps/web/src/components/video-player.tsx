@@ -127,9 +127,9 @@ export function VideoPlayer({
 	const elapsed = progress * duration;
 
 	return (
-		<div className="group relative overflow-hidden rounded-md">
+		<div className="group relative aspect-video overflow-hidden rounded-md">
 			<video
-				className="w-full"
+				className="size-full object-contain"
 				muted={muted}
 				onClick={togglePlay}
 				poster={poster}
