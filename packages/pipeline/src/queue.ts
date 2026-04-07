@@ -3,6 +3,8 @@ import { indexer as indexerTable } from "@indecks/db/schema/indexer";
 import { job as jobTable } from "@indecks/db/schema/job";
 import { library as libraryTable } from "@indecks/db/schema/library";
 import { video as videoTable } from "@indecks/db/schema/video";
+import { ActorManagerService } from "@indecks/state/effect-bridge";
+import { jobMachine } from "@indecks/state/machines/job";
 import type { VectorDbManagerShape } from "@indecks/vector";
 import { and, eq, inArray, or } from "drizzle-orm";
 import { Context, Effect, Layer, Schedule } from "effect";
@@ -141,6 +143,8 @@ const resolveLibraryId = (
 		return null;
 	});
 
+const MAX_RETRIES = 3;
+
 export interface JobQueueServiceShape {
 	readonly recoverStaleJobs: (db: Db) => Effect.Effect<number>;
 	readonly startWorker: (
@@ -158,6 +162,7 @@ export const JobQueueServiceLive = Layer.effect(
 	JobQueueService,
 	Effect.gen(function* () {
 		const processor = yield* ProcessorService;
+		const actors = yield* ActorManagerService;
 
 		return {
 			recoverStaleJobs: (db) =>
@@ -170,7 +175,30 @@ export const JobQueueServiceLive = Layer.effect(
 							.where(eq(jobTable.status, "cancelled"))
 					);
 
-					// Re-queue interrupted running jobs
+					// Restore running jobs as actors and send RECOVER event.
+					// The job machine transitions running → pending via RECOVER.
+					const runningJobs = yield* Effect.promise(() =>
+						db
+							.select()
+							.from(jobTable)
+							.where(eq(jobTable.status, "running"))
+							.all()
+					);
+
+					for (const job of runningJobs) {
+						const snapshot = jobMachine.resolveState({
+							value: "running" as const,
+							context: {
+								retryCount: job.retryCount,
+								maxRetries: MAX_RETRIES,
+								errorMessage: job.errorMessage,
+							},
+						});
+						actors.jobs.restore(job.id, snapshot);
+						actors.jobs.send(job.id, { type: "RECOVER" });
+						actors.jobs.dispose(job.id);
+					}
+
 					const result = yield* Effect.promise(() =>
 						db
 							.update(jobTable)
@@ -378,8 +406,6 @@ export const JobQueueServiceLive = Layer.effect(
 						return String(err);
 					};
 
-					const MAX_RETRIES = 3;
-
 					const resetVideoStatuses = (
 						jobRow: typeof jobTable.$inferSelect,
 						errorMsg: string
@@ -419,14 +445,28 @@ export const JobQueueServiceLive = Layer.effect(
 								Effect.annotateLogs("retryCount", jobRow.retryCount)
 							);
 
-							if (jobRow.retryCount < MAX_RETRIES) {
+							// Send FAIL event to the job actor.
+							// The machine's canRetry guard decides: retry → pending, exhausted → failed.
+							actors.jobs.send(jobRow.id, { type: "FAIL", error: msg });
+							const newState = actors.jobs.getState(jobRow.id);
+
+							if (newState === "pending") {
+								// Machine decided to retry (canRetry guard passed, retryCount incremented by machine)
+								const actor = actors.jobs.get(jobRow.id);
+								const retryCount =
+									(
+										actor?.getSnapshot() as {
+											context: { retryCount: number };
+										}
+									)?.context.retryCount ?? jobRow.retryCount + 1;
+
 								yield* Effect.promise(() =>
 									db
 										.update(jobTable)
 										.set({
 											status: "pending",
-											retryCount: jobRow.retryCount + 1,
-											progressMessage: `Retry ${jobRow.retryCount + 1}/${MAX_RETRIES}: ${msg}`,
+											retryCount,
+											progressMessage: `Retry ${retryCount}/${MAX_RETRIES}: ${msg}`,
 										})
 										.where(eq(jobTable.id, jobRow.id))
 								);
@@ -436,23 +476,23 @@ export const JobQueueServiceLive = Layer.effect(
 										jobRow.id,
 										"pending",
 										0,
-										`Retrying (${jobRow.retryCount + 1}/${MAX_RETRIES})...`,
+										`Retrying (${retryCount}/${MAX_RETRIES})...`,
 										null
 									)
 								);
-								return;
-							}
+							} else {
+								// Machine decided to fail permanently (exhaustedRetries guard)
+								yield* failJob(db, jobRow.id, msg);
+								yield* resetVideoStatuses(jobRow, msg);
 
-							yield* failJob(db, jobRow.id, msg);
-							yield* resetVideoStatuses(jobRow, msg);
-
-							if (jobRow.libraryId) {
-								yield* Effect.promise(() =>
-									db
-										.update(libraryTable)
-										.set({ status: "error" })
-										.where(eq(libraryTable.id, jobRow.libraryId as string))
-								).pipe(Effect.ignore);
+								if (jobRow.libraryId) {
+									yield* Effect.promise(() =>
+										db
+											.update(libraryTable)
+											.set({ status: "error" })
+											.where(eq(libraryTable.id, jobRow.libraryId as string))
+									).pipe(Effect.ignore);
+								}
 							}
 						});
 
@@ -461,6 +501,10 @@ export const JobQueueServiceLive = Layer.effect(
 							yield* Effect.logWarning(`Job ${jobRow.id} cancelled`).pipe(
 								Effect.annotateLogs("jobType", jobRow.type)
 							);
+
+							// Transition actor to cancelled state
+							actors.jobs.send(jobRow.id, { type: "CANCEL" });
+
 							yield* failJob(db, jobRow.id, "Job cancelled");
 							if (jobRow.videoId) {
 								yield* Effect.promise(() =>
@@ -491,17 +535,37 @@ export const JobQueueServiceLive = Layer.effect(
 							}
 						});
 
-					const runJob = (jobRow: typeof jobTable.$inferSelect) =>
-						processJob(jobRow).pipe(
-							Effect.tap(() => completeJob(db, jobRow.id, jobRow.type)),
+					const runJob = (jobRow: typeof jobTable.$inferSelect) => {
+						// Restore a long-lived actor for this job in "running" state.
+						// The actor persists context (retryCount, maxRetries, errorMessage)
+						// and uses guards to decide retry vs permanent failure.
+						actors.jobs.restore(
+							jobRow.id,
+							jobMachine.resolveState({
+								value: "running" as const,
+								context: {
+									retryCount: jobRow.retryCount,
+									maxRetries: MAX_RETRIES,
+									errorMessage: null,
+								},
+							})
+						);
+
+						return processJob(jobRow).pipe(
+							Effect.tap(() => {
+								actors.jobs.send(jobRow.id, { type: "COMPLETE" });
+								return completeJob(db, jobRow.id, jobRow.type);
+							}),
 							Effect.catchIf(
 								(err): err is JobCancelledError =>
 									err instanceof JobCancelledError,
 								() => handleCancellation(jobRow)
 							),
 							Effect.catchAll((err) => failJobWithError(jobRow, err)),
-							Effect.catchAllDefect((err) => failJobWithError(jobRow, err))
+							Effect.catchAllDefect((err) => failJobWithError(jobRow, err)),
+							Effect.ensuring(Effect.sync(() => actors.jobs.dispose(jobRow.id)))
 						);
+					};
 
 					const pollOnce = Effect.gen(function* () {
 						const jobRow = yield* claimNextJob(db);

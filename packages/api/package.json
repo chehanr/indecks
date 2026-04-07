@@ -16,6 +16,7 @@
     "@indecks/auth": "workspace:*",
     "@indecks/db": "workspace:*",
     "@indecks/pipeline": "workspace:*",
+    "@indecks/state": "workspace:*",
     "@indecks/vector": "workspace:*",
     "@trpc/server": "catalog:",
     "drizzle-orm": "catalog:",

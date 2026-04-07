@@ -1,5 +1,5 @@
 {
-  "name": "@indecks/pipeline",
+  "name": "@indecks/state",
   "type": "module",
   "exports": {
     "./*": {
@@ -7,13 +7,8 @@
     }
   },
   "dependencies": {
-    "@effect/platform": "catalog:",
-    "@indecks/db": "workspace:*",
-    "@indecks/state": "workspace:*",
-    "@indecks/vector": "workspace:*",
-    "drizzle-orm": "catalog:",
     "effect": "catalog:",
-    "nanoid": "^5.1.5"
+    "xstate": "^5.30.0"
   },
   "devDependencies": {
     "@indecks/config": "workspace:*",

@@ -67,3 +67,8 @@ export class IndexerNotFoundError extends Data.TaggedError(
 export class JobCancelledError extends Data.TaggedError("JobCancelledError")<{
 	readonly jobId: string;
 }> {}
+
+export class LibraryBusyError extends Data.TaggedError("LibraryBusyError")<{
+	readonly libraryId: string;
+	readonly currentStatus: string;
+}> {}

@@ -88,6 +88,7 @@
         "@indecks/auth": "workspace:*",
         "@indecks/db": "workspace:*",
         "@indecks/pipeline": "workspace:*",
+        "@indecks/state": "workspace:*",
         "@indecks/vector": "workspace:*",
         "@trpc/server": "catalog:",
         "drizzle-orm": "catalog:",
@@ -153,10 +154,23 @@
       "dependencies": {
         "@effect/platform": "catalog:",
         "@indecks/db": "workspace:*",
+        "@indecks/state": "workspace:*",
         "@indecks/vector": "workspace:*",
         "drizzle-orm": "catalog:",
         "effect": "catalog:",
         "nanoid": "^5.1.5",
+      },
+      "devDependencies": {
+        "@indecks/config": "workspace:*",
+        "@types/bun": "catalog:",
+        "typescript": "^5",
+      },
+    },
+    "packages/state": {
+      "name": "@indecks/state",
+      "dependencies": {
+        "effect": "catalog:",
+        "xstate": "^5.30.0",
       },
       "devDependencies": {
         "@indecks/config": "workspace:*",
@@ -445,6 +459,8 @@
     "@indecks/env": ["@indecks/env@workspace:packages/env"],
 
     "@indecks/pipeline": ["@indecks/pipeline@workspace:packages/pipeline"],
+
+    "@indecks/state": ["@indecks/state@workspace:packages/state"],
 
     "@indecks/ui": ["@indecks/ui@workspace:packages/ui"],
 
@@ -1639,6 +1655,8 @@
     "ws": ["ws@8.20.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-sAt8BhgNbzCtgGbt2OxmpuryO63ZoDk/sqaB/znQm94T4fCEsy/yV+7CdC1kJhOU9lboAEU7R3kquuycDoibVA=="],
 
     "wsl-utils": ["wsl-utils@0.3.1", "", { "dependencies": { "is-wsl": "^3.1.0", "powershell-utils": "^0.1.0" } }, "sha512-g/eziiSUNBSsdDJtCLB8bdYEUMj4jR7AGeUo96p/3dTafgjHhpF4RiCFPiRILwjQoDXx5MqkBr4fwWtR3Ky4Wg=="],
+
+    "xstate": ["xstate@5.30.0", "", {}, "sha512-mIzIuMjtYVkqXq9dUzYQoag7b/dF1CBS/yhliuPLfR0FwKPC18HiUivb/crcqY2gknhR8gJEhnppLg6ubQ0gGw=="],
 
     "y18n": ["y18n@5.0.8", "", {}, "sha512-0pfFzegeDWJHJIAmTLRP2DwHjdF5s7jo9tuztdQxAhINCdvS+3nGINqPd00AphqJR/0LhANUS6/+7SCb98YOfA=="],
 
