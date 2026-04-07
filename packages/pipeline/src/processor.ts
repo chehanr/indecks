@@ -459,7 +459,6 @@ export const ProcessorServiceLive = Layer.effect(
 								indexerId: ctx.indexerId,
 								startTime: chunkInfo.startTime,
 								endTime: chunkInfo.endTime,
-								isStillFrame: false,
 								embeddingStatus: "pending" as const,
 							})
 							.onConflictDoNothing()
@@ -479,31 +478,16 @@ export const ProcessorServiceLive = Layer.effect(
 
 						yield* insertChunkRecord(chunkInfo);
 
-						const chunkDuration = chunkInfo.endTime - chunkInfo.startTime;
-						const still = yield* ffmpeg.isStillFrame(
-							chunkInfo.chunkPath,
-							chunkDuration
+						// Read chunk with Bun's zero-copy file I/O and delete immediately
+						const videoBuffer = yield* Effect.promise(() =>
+							Bun.file(chunkInfo.chunkPath)
+								.arrayBuffer()
+								.then((ab) => Buffer.from(ab))
 						);
-
-						if (still) {
-							yield* Effect.promise(() =>
-								db
-									.update(chunkTable)
-									.set({
-										isStillFrame: true,
-										embeddingStatus: "skipped",
-									})
-									.where(eq(chunkTable.id, chunkId))
-							);
-							return;
-						}
-
-						const videoBytes = yield* fs
-							.readFile(chunkInfo.chunkPath)
-							.pipe(Effect.orDie);
 						yield* fs.remove(chunkInfo.chunkPath).pipe(Effect.ignore);
+
 						const embedding = yield* embedSvc.embedVideo(
-							Buffer.from(videoBytes),
+							videoBuffer,
 							ctx.config,
 							ctx.instruction
 						);

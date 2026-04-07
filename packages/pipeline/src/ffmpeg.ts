@@ -8,7 +8,6 @@ import { Context, Duration, Effect, Layer, Queue } from "effect";
 import { FFmpegError } from "./errors";
 
 const MP4_EXT = /\.mp4$/;
-const FREEZE_DURATION_RE = /freeze_duration:\s*([\d.]+)/;
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".avi", ".mkv", ".webm"]);
 
 const findVideos = (
@@ -182,11 +181,6 @@ export interface FFmpegServiceShape {
 	readonly getVideoDuration: (
 		filePath: string
 	) => Effect.Effect<number, FFmpegError>;
-	readonly isStillFrame: (
-		chunkPath: string,
-		duration: number,
-		threshold?: number
-	) => Effect.Effect<boolean>;
 	readonly scanDirectory: (
 		dirPath: string,
 		excludePatterns?: string[]
@@ -263,7 +257,6 @@ export const FFmpegServiceLive = Layer.effect(
 						overlap = 5,
 						downscaleHeight,
 						downscaleFps,
-						concurrency: chunkConcurrency,
 					} = options;
 					const absPath = resolve(filePath);
 					const duration = yield* getVideoDuration(executor, absPath);
@@ -292,19 +285,6 @@ export const FFmpegServiceLive = Layer.effect(
 							]
 						: ["-c", "copy"];
 
-					const makeChunk = (start: number, t: number, chunkPath: string) =>
-						runExitCode(executor, "ffmpeg", [
-							"-y",
-							"-ss",
-							String(start),
-							"-i",
-							absPath,
-							"-t",
-							String(t),
-							...codecArgs,
-							chunkPath,
-						]);
-
 					const specs = computeChunkSpecs(
 						duration,
 						chunkDuration,
@@ -312,11 +292,21 @@ export const FFmpegServiceLive = Layer.effect(
 						tmpDir
 					);
 
-					// Run ffmpeg in parallel
 					yield* Effect.forEach(
 						specs,
-						(spec) => makeChunk(spec.startTime, spec.t, spec.chunkPath),
-						{ concurrency: chunkConcurrency }
+						(spec) =>
+							runExitCode(executor, "ffmpeg", [
+								"-y",
+								"-ss",
+								String(spec.startTime),
+								"-i",
+								absPath,
+								"-t",
+								String(spec.t),
+								...codecArgs,
+								spec.chunkPath,
+							]),
+						{ concurrency: 2 }
 					);
 
 					return specs.map((spec) => ({
@@ -334,7 +324,6 @@ export const FFmpegServiceLive = Layer.effect(
 						overlap = 5,
 						downscaleHeight,
 						downscaleFps,
-						concurrency: chunkConcurrency,
 					} = options;
 					const absPath = resolve(filePath);
 					const duration = yield* getVideoDuration(executor, absPath);
@@ -393,7 +382,7 @@ export const FFmpegServiceLive = Layer.effect(
 									})
 								)
 							),
-						{ concurrency: chunkConcurrency, discard: true }
+						{ concurrency: 2, discard: true }
 					);
 
 					return { total: specs.length, produce, tmpDir };
@@ -419,33 +408,6 @@ export const FFmpegServiceLive = Layer.effect(
 					]);
 
 					return outPath;
-				}),
-
-			isStillFrame: (chunkPath, duration, threshold = 0.98) =>
-				Effect.gen(function* () {
-					if (duration < 0.5) {
-						return false;
-					}
-
-					// Single-pass freeze detection via ffmpeg filter
-					const output = yield* runString(executor, "ffmpeg", [
-						"-i",
-						chunkPath,
-						"-vf",
-						"freezedetect=n=0.003:d=0.5",
-						"-f",
-						"null",
-						"-",
-					]).pipe(Effect.catchAll(() => Effect.succeed("")));
-
-					// freezedetect outputs freeze_duration in stderr/stdout
-					// If freeze covers >= threshold of total duration, it's a still frame
-					const match = FREEZE_DURATION_RE.exec(output);
-					if (!match?.[1]) {
-						return false;
-					}
-					const freezeDuration = Number.parseFloat(match[1]);
-					return freezeDuration / duration >= threshold;
 				}),
 
 			scanDirectory: (dirPath, excludePatterns) =>
