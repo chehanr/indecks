@@ -11,6 +11,7 @@ export const job = sqliteTable(
 				"index_video",
 				"index_library",
 				"regenerate_thumbnails",
+				"generate_missing_thumbnails",
 			],
 		}).notNull(),
 		status: text("status", {

@@ -54,6 +54,12 @@ const makeChunkId = (
 };
 
 export interface ProcessorServiceShape {
+	readonly generateMissingThumbnails: (
+		db: Db,
+		libraryId: string,
+		indexerId: string,
+		onProgress?: ProgressFn
+	) => Effect.Effect<number>;
 	readonly indexLibrary: (
 		db: Db,
 		vectorDbManager: VectorDbManagerShape,
@@ -1083,7 +1089,71 @@ export const ProcessorServiceLive = Layer.effect(
 				return generated;
 			});
 
+		const generateMissingThumbnails = (
+			db: Db,
+			libraryId: string,
+			indexerId: string,
+			onProgress?: ProgressFn
+		): Effect.Effect<number> =>
+			Effect.gen(function* () {
+				const videos = yield* Effect.promise(() =>
+					db
+						.select({
+							id: videoTable.id,
+							filePath: videoTable.filePath,
+							fileName: videoTable.fileName,
+						})
+						.from(videoTable)
+						.where(
+							and(
+								eq(videoTable.libraryId, libraryId),
+								eq(videoTable.status, "indexed")
+							)
+						)
+						.all()
+				);
+
+				if (videos.length === 0) {
+					yield* progress(onProgress, 100, "No indexed videos found.");
+					return 0;
+				}
+
+				let totalGenerated = 0;
+				let videosProcessed = 0;
+
+				for (const vid of videos) {
+					const chunks = yield* Effect.promise(() =>
+						db
+							.select({ startTime: chunkTable.startTime })
+							.from(chunkTable)
+							.where(
+								and(
+									eq(chunkTable.videoId, vid.id),
+									eq(chunkTable.indexerId, indexerId)
+								)
+							)
+							.all()
+					);
+
+					for (const chunk of chunks) {
+						yield* thumbCache.generateForVideo(vid.filePath, chunk.startTime);
+						totalGenerated++;
+					}
+
+					videosProcessed++;
+					const pct = Math.round((videosProcessed / videos.length) * 100);
+					yield* progress(
+						onProgress,
+						pct,
+						`Thumbnails: ${videosProcessed}/${videos.length} videos (${totalGenerated} generated)`
+					);
+				}
+
+				return totalGenerated;
+			});
+
 		return {
+			generateMissingThumbnails,
 			scanLibraryFolder,
 			processVideo,
 			indexLibrary,

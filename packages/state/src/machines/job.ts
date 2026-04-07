@@ -9,7 +9,8 @@ export const jobMachine = setup({
 				| "scan_library"
 				| "index_library"
 				| "index_video"
-				| "regenerate_thumbnails";
+				| "regenerate_thumbnails"
+				| "generate_missing_thumbnails";
 			libraryId: string | null;
 			videoId: string | null;
 			indexerId: string | null;
@@ -31,7 +32,8 @@ export const jobMachine = setup({
 				| "scan_library"
 				| "index_library"
 				| "index_video"
-				| "regenerate_thumbnails";
+				| "regenerate_thumbnails"
+				| "generate_missing_thumbnails";
 			libraryId: string | null;
 			videoId: string | null;
 			indexerId: string | null;

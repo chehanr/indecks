@@ -506,6 +506,46 @@ export const libraryRouter = router({
 			)
 		),
 
+	generateMissingThumbnails: protectedProcedure
+		.input(z.object({ libraryId: z.string(), indexerId: z.string().min(1) }))
+		.mutation(({ ctx, input }) =>
+			runEffect(
+				ctx.runtime,
+				Effect.gen(function* () {
+					const db = yield* DbService;
+
+					const lib = yield* Effect.promise(() =>
+						db
+							.select({ id: libraryTable.id, name: libraryTable.name })
+							.from(libraryTable)
+							.where(eq(libraryTable.id, input.libraryId))
+							.get()
+					);
+
+					if (!lib) {
+						return yield* new LibraryNotFoundError({
+							libraryId: input.libraryId,
+						});
+					}
+
+					const jobId = nanoid();
+					const progressMessage = `Queued: generate missing thumbnails for ${lib.name}`;
+					yield* Effect.promise(() =>
+						db.insert(jobTable).values({
+							id: jobId,
+							type: "generate_missing_thumbnails",
+							libraryId: input.libraryId,
+							indexerId: input.indexerId,
+							status: "pending",
+							progressMessage,
+						})
+					);
+
+					return { jobId, progressMessage };
+				})
+			)
+		),
+
 	video: protectedProcedure
 		.input(z.object({ id: z.string() }))
 		.query(({ ctx, input }) =>

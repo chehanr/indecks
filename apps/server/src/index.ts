@@ -90,71 +90,86 @@ setJobProgressCallback(
 	}
 );
 
-setJobExecutor(async (input, callbacks) => {
-	await appRuntime.runPromise(
-		Effect.gen(function* () {
-			const processor = yield* ProcessorService;
-			const db = yield* DbService;
-			const vectorDbManager = yield* VectorDbManagerService;
+type JobInput = Parameters<Parameters<typeof setJobExecutor>[0]>[0];
+type ProgressFn = (progress: number, message: string) => Effect.Effect<void>;
 
-			const onProgress = (progress: number, message: string) =>
-				Effect.sync(() => callbacks.onProgress(progress, message));
+const requireFields = <K extends keyof JobInput>(
+	input: JobInput,
+	...fields: K[]
+): Record<K, NonNullable<JobInput[K]>> => {
+	for (const f of fields) {
+		if (!input[f]) {
+			throw new Error(`${input.jobType} requires ${f}`);
+		}
+	}
+	return input as Record<K, NonNullable<JobInput[K]>>;
+};
 
-			switch (input.jobType) {
-				case "scan_library": {
-					if (!input.libraryId) {
-						throw new Error("scan_library requires libraryId");
-					}
-					yield* processor.scanLibraryFolder(db, input.libraryId, onProgress);
-					break;
-				}
-				case "index_video": {
-					if (!(input.videoId && input.indexerId)) {
-						throw new Error("index_video requires videoId and indexerId");
-					}
-					yield* processor.processVideo(
-						db,
-						input.videoId,
-						input.indexerId,
-						vectorDbManager,
-						input.jobId,
-						onProgress
-					);
-					break;
-				}
-				case "index_library": {
-					if (!(input.libraryId && input.indexerId)) {
-						throw new Error("index_library requires libraryId and indexerId");
-					}
-					yield* processor.indexLibrary(
-						db,
-						vectorDbManager,
-						input.libraryId,
-						input.indexerId,
-						input.jobId,
-						onProgress
-					);
-					break;
-				}
-				case "regenerate_thumbnails": {
-					if (!(input.videoId && input.indexerId)) {
-						throw new Error(
-							"regenerate_thumbnails requires videoId and indexerId"
-						);
-					}
-					yield* processor.regenerateThumbnails(
-						db,
-						input.videoId,
-						input.indexerId,
-						onProgress
-					);
-					break;
-				}
-				default:
-					throw new Error(`Unknown job type: ${input.jobType}`);
+const dispatchJob = (input: JobInput, onProgress: ProgressFn) =>
+	Effect.gen(function* () {
+		const processor = yield* ProcessorService;
+		const db = yield* DbService;
+		const vectorDbManager = yield* VectorDbManagerService;
+
+		switch (input.jobType) {
+			case "scan_library": {
+				const r = requireFields(input, "libraryId");
+				yield* processor.scanLibraryFolder(db, r.libraryId, onProgress);
+				break;
 			}
-		})
-	);
+			case "index_video": {
+				const r = requireFields(input, "videoId", "indexerId");
+				yield* processor.processVideo(
+					db,
+					r.videoId,
+					r.indexerId,
+					vectorDbManager,
+					input.jobId,
+					onProgress
+				);
+				break;
+			}
+			case "index_library": {
+				const r = requireFields(input, "libraryId", "indexerId");
+				yield* processor.indexLibrary(
+					db,
+					vectorDbManager,
+					r.libraryId,
+					r.indexerId,
+					input.jobId,
+					onProgress
+				);
+				break;
+			}
+			case "regenerate_thumbnails": {
+				const r = requireFields(input, "videoId", "indexerId");
+				yield* processor.regenerateThumbnails(
+					db,
+					r.videoId,
+					r.indexerId,
+					onProgress
+				);
+				break;
+			}
+			case "generate_missing_thumbnails": {
+				const r = requireFields(input, "libraryId", "indexerId");
+				yield* processor.generateMissingThumbnails(
+					db,
+					r.libraryId,
+					r.indexerId,
+					onProgress
+				);
+				break;
+			}
+			default:
+				throw new Error(`Unknown job type: ${input.jobType}`);
+		}
+	});
+
+setJobExecutor(async (input, callbacks) => {
+	const onProgress = (progress: number, message: string) =>
+		Effect.sync(() => callbacks.onProgress(progress, message));
+	await appRuntime.runPromise(dispatchJob(input, onProgress));
 });
 
 await appRuntime.runPromise(

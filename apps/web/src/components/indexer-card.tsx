@@ -32,7 +32,7 @@ import {
 } from "@indecks/ui/components/field";
 import { Input } from "@indecks/ui/components/input";
 import { useMutation } from "@tanstack/react-query";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -553,6 +553,24 @@ export function IndexerCard({
 		},
 	});
 
+	const missingThumbsMutation = useMutation({
+		mutationFn: () =>
+			trpcClient.library.generateMissingThumbnails.mutate({
+				libraryId,
+				indexerId: indexer.id,
+			}),
+		onSuccess: (data) => {
+			toast.success("Generating missing thumbnails");
+			onJobStarted?.(data.jobId, data.progressMessage);
+			queryClient.invalidateQueries({ queryKey: [["job", "list"]] });
+		},
+		onError: (err) => {
+			toast.error(err.message);
+		},
+	});
+
+	const isBusy = indexMutation.isPending || missingThumbsMutation.isPending;
+
 	return (
 		<div className="flex items-center justify-between rounded-md border p-3">
 			<div className="min-w-0 flex-1">
@@ -573,12 +591,8 @@ export function IndexerCard({
 				<DropdownMenu>
 					<DropdownMenuTrigger
 						render={
-							<Button
-								disabled={indexMutation.isPending}
-								size="sm"
-								variant="outline"
-							>
-								Index
+							<Button disabled={isBusy} size="icon" variant="ghost">
+								<MoreHorizontal className="size-4" />
 							</Button>
 						}
 					/>
@@ -588,6 +602,9 @@ export function IndexerCard({
 						</DropdownMenuItem>
 						<DropdownMenuItem onClick={() => indexMutation.mutate(true)}>
 							Force re-index all
+						</DropdownMenuItem>
+						<DropdownMenuItem onClick={() => missingThumbsMutation.mutate()}>
+							Generate missing thumbnails
 						</DropdownMenuItem>
 					</DropdownMenuContent>
 				</DropdownMenu>

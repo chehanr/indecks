@@ -11,7 +11,6 @@ import { createLazyFileRoute, Link } from "@tanstack/react-router";
 
 import { BreadcrumbPortal } from "@/components/breadcrumb-slot";
 import { VideoActionsMenu } from "@/components/video-actions";
-import { formatTime } from "@/components/video-player";
 import { useJobTracking, useLibrary } from "@/hooks/use-library";
 import { formatDuration, formatFileSize, statusColors } from "@/utils/format";
 import { trpc } from "@/utils/trpc";
