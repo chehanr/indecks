@@ -14,7 +14,14 @@ import {
 } from "@indecks/ui/components/native-select";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createLazyFileRoute, Link } from "@tanstack/react-router";
-import { ChevronLeft, ChevronRight, FolderSearch, Search } from "lucide-react";
+import {
+	ArrowDownAZ,
+	ArrowUpAZ,
+	ChevronLeft,
+	ChevronRight,
+	FolderSearch,
+	Search,
+} from "lucide-react";
 import { parseAsInteger, parseAsString, useQueryState } from "nuqs";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -34,6 +41,16 @@ export const Route = createLazyFileRoute(
 const PAGE_SIZE_OPTIONS = [20, 40, 60, 100] as const;
 const DEFAULT_PAGE_SIZE = 20;
 
+const SORT_OPTIONS = [
+	{ value: "fileName", label: "Name" },
+	{ value: "fileSize", label: "Size" },
+	{ value: "duration", label: "Duration" },
+	{ value: "status", label: "Status" },
+	{ value: "createdAt", label: "Created" },
+	{ value: "modifiedAt", label: "Modified" },
+] as const;
+type SortBy = (typeof SORT_OPTIONS)[number]["value"];
+
 function VideosPage() {
 	const { libraryId } = Route.useParams();
 	const library = useLibrary();
@@ -48,6 +65,14 @@ function VideosPage() {
 	const [pageSize, setPageSize] = useQueryState(
 		"size",
 		parseAsInteger.withDefault(DEFAULT_PAGE_SIZE)
+	);
+	const [sortBy, setSortBy] = useQueryState(
+		"sort",
+		parseAsString.withDefault("fileName")
+	);
+	const [sortOrder, setSortOrder] = useQueryState(
+		"order",
+		parseAsString.withDefault("asc")
 	);
 
 	const effectivePageSize = PAGE_SIZE_OPTIONS.includes(
@@ -68,10 +93,17 @@ function VideosPage() {
 		debouncedSearch(value);
 	};
 
+	const effectiveSortBy = SORT_OPTIONS.some((o) => o.value === sortBy)
+		? (sortBy as SortBy)
+		: "fileName";
+	const effectiveSortOrder = sortOrder === "desc" ? "desc" : "asc";
+
 	const videosQuery = useQuery(
 		trpc.library.videos.queryOptions({
 			libraryId,
 			search: searchQuery || undefined,
+			sortBy: effectiveSortBy,
+			sortOrder: effectiveSortOrder,
 			limit: effectivePageSize,
 			offset,
 		})
@@ -152,6 +184,36 @@ function VideosPage() {
 						{total} results
 					</p>
 					<div className="flex items-center gap-2">
+						<NativeSelect
+							className="w-auto"
+							onChange={(e) => {
+								setSortBy(
+									e.target.value === "fileName" ? null : e.target.value
+								);
+								setPage(null);
+							}}
+							value={effectiveSortBy}
+						>
+							{SORT_OPTIONS.map((opt) => (
+								<NativeSelectOption key={opt.value} value={opt.value}>
+									{opt.label}
+								</NativeSelectOption>
+							))}
+						</NativeSelect>
+						<Button
+							onClick={() => {
+								setSortOrder(effectiveSortOrder === "asc" ? "desc" : null);
+								setPage(null);
+							}}
+							size="icon"
+							variant="ghost"
+						>
+							{effectiveSortOrder === "asc" ? (
+								<ArrowDownAZ className="size-4" />
+							) : (
+								<ArrowUpAZ className="size-4" />
+							)}
+						</Button>
 						<NativeSelect
 							className="w-auto"
 							onChange={(e) =>

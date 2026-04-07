@@ -16,7 +16,7 @@ import { ThumbnailCacheService } from "@indecks/pipeline/thumbnail-cache";
 import { canTransitionLibrary } from "@indecks/state/transition";
 import type { LibraryStatus } from "@indecks/state/types";
 import { VectorDbManagerService } from "@indecks/vector";
-import { and, count, eq, inArray, like } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, like } from "drizzle-orm";
 import { Effect } from "effect";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -523,7 +523,34 @@ export const libraryRouter = router({
 					if (!row) {
 						return yield* new VideoNotFoundError({ videoId: input.id });
 					}
-					return row;
+
+					const chunks = yield* Effect.promise(() =>
+						db
+							.select({ indexerId: chunkTable.indexerId })
+							.from(chunkTable)
+							.where(
+								and(
+									eq(chunkTable.videoId, input.id),
+									eq(chunkTable.embeddingStatus, "embedded")
+								)
+							)
+							.all()
+					);
+
+					const indexerIds = [...new Set(chunks.map((c) => c.indexerId))];
+					let indexedBy: string[] = [];
+					if (indexerIds.length > 0) {
+						const indexers = yield* Effect.promise(() =>
+							db
+								.select({ id: indexerTable.id, name: indexerTable.name })
+								.from(indexerTable)
+								.where(inArray(indexerTable.id, indexerIds))
+								.all()
+						);
+						indexedBy = indexers.map((e) => e.name);
+					}
+
+					return { ...row, indexedBy };
 				})
 			)
 		),
@@ -533,6 +560,17 @@ export const libraryRouter = router({
 			z.object({
 				libraryId: z.string(),
 				search: z.string().optional(),
+				sortBy: z
+					.enum([
+						"fileName",
+						"fileSize",
+						"duration",
+						"status",
+						"createdAt",
+						"modifiedAt",
+					])
+					.default("fileName"),
+				sortOrder: z.enum(["asc", "desc"]).default("asc"),
 				limit: z.number().min(1).max(100).default(20),
 				offset: z.number().min(0).default(0),
 			})
@@ -558,11 +596,16 @@ export const libraryRouter = router({
 					);
 					const total = totalResult?.count ?? 0;
 
+					const sortCol = videoTable[input.sortBy];
+					const orderBy =
+						input.sortOrder === "desc" ? desc(sortCol) : asc(sortCol);
+
 					const videos = yield* Effect.promise(() =>
 						db
 							.select()
 							.from(videoTable)
 							.where(whereClause)
+							.orderBy(orderBy)
 							.limit(input.limit)
 							.offset(input.offset)
 							.all()
