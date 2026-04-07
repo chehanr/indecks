@@ -15,7 +15,7 @@ export interface LibraryData {
 export interface LibraryContextValue {
 	library: LibraryData;
 	trackedJobIds: string[];
-	trackJob: (jobId: string) => void;
+	trackJob: (jobId: string, initialMessage?: string) => void;
 }
 
 export const LibraryContext = createContext<LibraryContextValue | null>(null);

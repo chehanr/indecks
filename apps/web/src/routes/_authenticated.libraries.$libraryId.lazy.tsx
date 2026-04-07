@@ -34,30 +34,34 @@ function LibraryLayout() {
 	const libraryQuery = useQuery(
 		trpc.library.get.queryOptions({ id: libraryId })
 	);
-	const [trackedJobIds, setTrackedJobIds] = useState<string[]>([]);
+	const [trackedJobs, setTrackedJobs] = useState<
+		{ id: string; initialMessage?: string | null }[]
+	>([]);
 
 	useEffect(() => {
 		trpcClient.job.list.query({ libraryId }).then((jobs) => {
-			const activeIds = jobs
+			const active = jobs
 				.filter((j) => j.status === "pending" || j.status === "running")
-				.map((j) => j.id);
-			if (activeIds.length > 0) {
-				setTrackedJobIds((prev) => [
-					...prev,
-					...activeIds.filter((id) => !prev.includes(id)),
-				]);
+				.map((j) => ({ id: j.id, initialMessage: j.progressMessage }));
+			if (active.length > 0) {
+				setTrackedJobs((prev) => {
+					const existingIds = new Set(prev.map((j) => j.id));
+					return [...prev, ...active.filter((j) => !existingIds.has(j.id))];
+				});
 			}
 		});
 	}, [libraryId]);
 
-	const trackJob = useCallback((jobId: string) => {
-		setTrackedJobIds((prev) =>
-			prev.includes(jobId) ? prev : [...prev, jobId]
+	const trackJob = useCallback((jobId: string, initialMessage?: string) => {
+		setTrackedJobs((prev) =>
+			prev.some((j) => j.id === jobId)
+				? prev
+				: [...prev, { id: jobId, initialMessage }]
 		);
 	}, []);
 
 	const removeJob = useCallback((jobId: string) => {
-		setTrackedJobIds((prev) => prev.filter((id) => id !== jobId));
+		setTrackedJobs((prev) => prev.filter((j) => j.id !== jobId));
 	}, []);
 
 	const library = libraryQuery.data;
@@ -70,7 +74,9 @@ function LibraryLayout() {
 	}
 
 	return (
-		<LibraryContext value={{ library, trackedJobIds, trackJob }}>
+		<LibraryContext
+			value={{ library, trackedJobIds: trackedJobs.map((j) => j.id), trackJob }}
+		>
 			<BreadcrumbPortal>
 				<Breadcrumb>
 					<BreadcrumbList>
@@ -106,13 +112,14 @@ function LibraryLayout() {
 					<Separator className="mt-2" />
 				</div>
 
-				{trackedJobIds.length > 0 && (
+				{trackedJobs.length > 0 && (
 					<div className="space-y-2">
-						{trackedJobIds.map((jobId) => (
+						{trackedJobs.map((job) => (
 							<JobProgress
-								jobId={jobId}
-								key={jobId}
-								onDone={() => removeJob(jobId)}
+								initialMessage={job.initialMessage}
+								jobId={job.id}
+								key={job.id}
+								onDone={() => removeJob(job.id)}
 							/>
 						))}
 					</div>

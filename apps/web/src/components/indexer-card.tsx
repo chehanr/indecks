@@ -521,7 +521,7 @@ export function IndexerCard({
 		indexConcurrency: number;
 	};
 	libraryId: string;
-	onJobStarted?: (jobId: string) => void;
+	onJobStarted?: (jobId: string, initialMessage?: string) => void;
 }) {
 	const setDefaultMutation = useMutation({
 		mutationFn: () =>
@@ -544,7 +544,7 @@ export function IndexerCard({
 			}),
 		onSuccess: (data) => {
 			toast.success(`Indexing started with ${indexer.name}`);
-			onJobStarted?.(data.jobId);
+			onJobStarted?.(data.jobId, data.progressMessage);
 			queryClient.invalidateQueries({ queryKey: [["job", "list"]] });
 			queryClient.invalidateQueries({ queryKey: [["library", "get"]] });
 		},

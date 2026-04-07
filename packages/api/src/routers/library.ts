@@ -241,16 +241,18 @@ export const libraryRouter = router({
 					);
 
 					const jobId = nanoid();
+					const progressMessage = `Queued: scan ${lib.name}`;
 					yield* Effect.promise(() =>
 						db.insert(jobTable).values({
 							id: jobId,
 							type: "scan_library",
 							libraryId: input.id,
 							status: "pending",
+							progressMessage,
 						})
 					);
 
-					return { jobId };
+					return { jobId, progressMessage };
 				})
 			)
 		),
@@ -347,6 +349,7 @@ export const libraryRouter = router({
 					);
 
 					const jobId = nanoid();
+					const progressMessage = `Queued: index ${lib.name}`;
 					yield* Effect.promise(() =>
 						db.insert(jobTable).values({
 							id: jobId,
@@ -354,10 +357,11 @@ export const libraryRouter = router({
 							libraryId: input.id,
 							indexerId: input.indexerId,
 							status: "pending",
+							progressMessage,
 						})
 					);
 
-					return { jobId };
+					return { jobId, progressMessage };
 				})
 			)
 		),
@@ -439,6 +443,7 @@ export const libraryRouter = router({
 					);
 
 					const jobId = nanoid();
+					const progressMessage = `Queued: index ${vid.fileName}`;
 					yield* Effect.promise(() =>
 						db.insert(jobTable).values({
 							id: jobId,
@@ -447,10 +452,11 @@ export const libraryRouter = router({
 							libraryId: vid.libraryId,
 							indexerId: input.indexerId,
 							status: "pending",
+							progressMessage,
 						})
 					);
 
-					return { jobId };
+					return { jobId, progressMessage };
 				})
 			)
 		),

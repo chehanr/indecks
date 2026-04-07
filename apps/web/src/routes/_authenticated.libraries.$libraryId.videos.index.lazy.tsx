@@ -93,7 +93,7 @@ function VideosPage() {
 		mutationFn: () => trpcClient.library.startScan.mutate({ id: libraryId }),
 		onSuccess: (data) => {
 			toast.success("Scan started");
-			trackJob(data.jobId);
+			trackJob(data.jobId, data.progressMessage);
 			queryClient.invalidateQueries({ queryKey: [["job", "list"]] });
 			queryClient.invalidateQueries({ queryKey: [["library", "get"]] });
 		},

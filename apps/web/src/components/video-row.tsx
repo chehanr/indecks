@@ -31,7 +31,7 @@ function IndexVideoDialog({
 		dimensions: number;
 		isDefault: boolean;
 	}[];
-	onJobStarted?: (jobId: string) => void;
+	onJobStarted?: (jobId: string, initialMessage?: string) => void;
 }) {
 	const [open, setOpen] = useState(false);
 	const [selectedId, setSelectedId] = useState("");
@@ -44,7 +44,7 @@ function IndexVideoDialog({
 			}),
 		onSuccess: (data) => {
 			toast.success("Indexing started");
-			onJobStarted?.(data.jobId);
+			onJobStarted?.(data.jobId, data.progressMessage);
 			queryClient.invalidateQueries({ queryKey: [["job", "list"]] });
 			queryClient.invalidateQueries({ queryKey: [["library", "videos"]] });
 			setOpen(false);
@@ -121,7 +121,7 @@ export function VideoRow({
 		dimensions: number;
 		isDefault: boolean;
 	}[];
-	onJobStarted?: (jobId: string) => void;
+	onJobStarted?: (jobId: string, initialMessage?: string) => void;
 }) {
 	return (
 		<div className="flex items-center justify-between py-2">

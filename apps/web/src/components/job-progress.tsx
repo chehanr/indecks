@@ -12,15 +12,17 @@ import { queryClient, trpcClient } from "@/utils/trpc";
 
 export function JobProgress({
 	jobId,
+	initialMessage,
 	onDone,
 }: {
 	jobId: string;
+	initialMessage?: string | null;
 	onDone?: () => void;
 }) {
 	const [state, setState] = useState({
 		status: "running",
 		progress: 0,
-		progressMessage: null as string | null,
+		progressMessage: initialMessage ?? null,
 		errorMessage: null as string | null,
 	});
 
