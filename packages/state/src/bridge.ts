@@ -1,7 +1,11 @@
 export interface JobExecutorInput {
 	indexerId: string | null;
 	jobId: string;
-	jobType: "scan_library" | "index_library" | "index_video";
+	jobType:
+		| "scan_library"
+		| "index_library"
+		| "index_video"
+		| "regenerate_thumbnails";
 	libraryId: string | null;
 	videoId: string | null;
 }

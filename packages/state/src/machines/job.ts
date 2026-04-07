@@ -5,7 +5,11 @@ import { getJobExecutor, type JobExecutorInput } from "../bridge";
 export const jobMachine = setup({
 	types: {
 		context: {} as {
-			jobType: "scan_library" | "index_library" | "index_video";
+			jobType:
+				| "scan_library"
+				| "index_library"
+				| "index_video"
+				| "regenerate_thumbnails";
 			libraryId: string | null;
 			videoId: string | null;
 			indexerId: string | null;
@@ -23,7 +27,11 @@ export const jobMachine = setup({
 			| { type: "JOB_DONE" }
 			| { type: "JOB_ERROR"; error: string },
 		input: {} as {
-			jobType: "scan_library" | "index_library" | "index_video";
+			jobType:
+				| "scan_library"
+				| "index_library"
+				| "index_video"
+				| "regenerate_thumbnails";
 			libraryId: string | null;
 			videoId: string | null;
 			indexerId: string | null;

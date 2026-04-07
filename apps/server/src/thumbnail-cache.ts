@@ -11,6 +11,55 @@ const pathHash = (filePath: string) =>
 
 export const ThumbnailCacheServiceLive = (dir: string) =>
 	Layer.succeed(ThumbnailCacheService, {
+		generateForVideo: (videoPath, seconds) =>
+			Effect.gen(function* () {
+				const absPath = resolve(videoPath);
+				const hash = pathHash(absPath);
+				const thumbPath = resolve(dir, `${hash}_${seconds}.jpg`);
+
+				if (existsSync(thumbPath)) {
+					return;
+				}
+
+				const result = yield* Effect.async<
+					{ code: number | null; stderr: string },
+					never
+				>((resume) => {
+					const stderrChunks: Buffer[] = [];
+					const proc = spawn("ffmpeg", [
+						"-nostdin",
+						"-ss",
+						String(seconds),
+						"-i",
+						absPath,
+						"-frames:v",
+						"1",
+						"-vf",
+						"scale=320:-2",
+						"-q:v",
+						"6",
+						"-y",
+						thumbPath,
+					]);
+					proc.stdout.resume();
+					proc.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+					proc.on("close", (code) =>
+						resume(
+							Effect.succeed({
+								code,
+								stderr: Buffer.concat(stderrChunks).toString(),
+							})
+						)
+					);
+				});
+
+				if (result.code !== 0) {
+					yield* Effect.logWarning(
+						`Thumbnail failed (exit ${result.code}): ${thumbPath}\n${result.stderr.slice(-500)}`
+					);
+				}
+			}).pipe(Effect.ignore),
+
 		generateFromChunk: (videoPath, chunkPath, seconds) =>
 			Effect.gen(function* () {
 				const hash = pathHash(resolve(videoPath));

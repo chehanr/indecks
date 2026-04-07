@@ -75,6 +75,12 @@ export interface ProcessorServiceShape {
 		jobId?: string,
 		onProgress?: ProgressFn
 	) => Effect.Effect<void, VideoNotFoundError | JobCancelledError>;
+	readonly regenerateThumbnails: (
+		db: Db,
+		videoId: string,
+		indexerId: string,
+		onProgress?: ProgressFn
+	) => Effect.Effect<number, VideoNotFoundError>;
 	readonly scanLibraryFolder: (
 		db: Db,
 		libraryId: string,
@@ -1011,6 +1017,77 @@ export const ProcessorServiceLive = Layer.effect(
 				);
 			});
 
-		return { scanLibraryFolder, processVideo, indexLibrary };
+		const regenerateThumbnails = (
+			db: Db,
+			videoId: string,
+			indexerId: string,
+			onProgress?: ProgressFn
+		): Effect.Effect<number, VideoNotFoundError> =>
+			Effect.gen(function* () {
+				const vid = yield* Effect.promise(() =>
+					db
+						.select({
+							filePath: videoTable.filePath,
+							fileName: videoTable.fileName,
+						})
+						.from(videoTable)
+						.where(eq(videoTable.id, videoId))
+						.get()
+				);
+
+				if (!vid) {
+					return yield* new VideoNotFoundError({ videoId });
+				}
+
+				const chunks = yield* Effect.promise(() =>
+					db
+						.select({ startTime: chunkTable.startTime })
+						.from(chunkTable)
+						.where(
+							and(
+								eq(chunkTable.videoId, videoId),
+								eq(chunkTable.indexerId, indexerId)
+							)
+						)
+						.all()
+				);
+
+				if (chunks.length === 0) {
+					yield* progress(
+						onProgress,
+						100,
+						"No chunks to generate thumbnails for."
+					);
+					return 0;
+				}
+
+				yield* progress(
+					onProgress,
+					0,
+					`Removing old thumbnails for ${vid.fileName}...`
+				);
+				yield* thumbCache.removeByPaths([vid.filePath]);
+
+				let generated = 0;
+				for (const chunk of chunks) {
+					yield* thumbCache.generateForVideo(vid.filePath, chunk.startTime);
+					generated++;
+					const pct = Math.round((generated / chunks.length) * 100);
+					yield* progress(
+						onProgress,
+						pct,
+						`Thumbnails: ${generated}/${chunks.length}`
+					);
+				}
+
+				return generated;
+			});
+
+		return {
+			scanLibraryFolder,
+			processVideo,
+			indexLibrary,
+			regenerateThumbnails,
+		};
 	})
 );

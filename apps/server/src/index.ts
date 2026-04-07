@@ -136,6 +136,20 @@ setJobExecutor(async (input, callbacks) => {
 					);
 					break;
 				}
+				case "regenerate_thumbnails": {
+					if (!(input.videoId && input.indexerId)) {
+						throw new Error(
+							"regenerate_thumbnails requires videoId and indexerId"
+						);
+					}
+					yield* processor.regenerateThumbnails(
+						db,
+						input.videoId,
+						input.indexerId,
+						onProgress
+					);
+					break;
+				}
 				default:
 					throw new Error(`Unknown job type: ${input.jobType}`);
 			}

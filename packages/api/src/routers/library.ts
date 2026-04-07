@@ -461,6 +461,51 @@ export const libraryRouter = router({
 			)
 		),
 
+	regenerateThumbnails: protectedProcedure
+		.input(z.object({ videoId: z.string(), indexerId: z.string().min(1) }))
+		.mutation(({ ctx, input }) =>
+			runEffect(
+				ctx.runtime,
+				Effect.gen(function* () {
+					const db = yield* DbService;
+
+					const vid = yield* Effect.promise(() =>
+						db
+							.select({
+								id: videoTable.id,
+								fileName: videoTable.fileName,
+								libraryId: videoTable.libraryId,
+							})
+							.from(videoTable)
+							.where(eq(videoTable.id, input.videoId))
+							.get()
+					);
+
+					if (!vid) {
+						return yield* new VideoNotFoundError({
+							videoId: input.videoId,
+						});
+					}
+
+					const jobId = nanoid();
+					const progressMessage = `Queued: regenerate thumbnails for ${vid.fileName}`;
+					yield* Effect.promise(() =>
+						db.insert(jobTable).values({
+							id: jobId,
+							type: "regenerate_thumbnails",
+							videoId: input.videoId,
+							libraryId: vid.libraryId,
+							indexerId: input.indexerId,
+							status: "pending",
+							progressMessage,
+						})
+					);
+
+					return { jobId, progressMessage };
+				})
+			)
+		),
+
 	video: protectedProcedure
 		.input(z.object({ id: z.string() }))
 		.query(({ ctx, input }) =>

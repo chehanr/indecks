@@ -4,39 +4,54 @@ import {
 	DialogContent,
 	DialogHeader,
 	DialogTitle,
-	DialogTrigger,
 } from "@indecks/ui/components/dialog";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@indecks/ui/components/dropdown-menu";
 import {
 	NativeSelect,
 	NativeSelectOption,
 } from "@indecks/ui/components/native-select";
 import { useMutation } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
+import { MoreHorizontal } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { queryClient, trpcClient } from "@/utils/trpc";
 
-// --- Index Video Dialog ---
+interface Indexer {
+	dimensions: number;
+	id: string;
+	isDefault: boolean;
+	model: string;
+	name: string;
+}
 
-function IndexVideoDialog({
+type DialogAction = "reindex" | "regenerate_thumbnails";
+
+function ActionDialog({
 	videoId,
+	action,
 	indexers,
+	open,
+	onOpenChange,
 	onJobStarted,
 }: {
 	videoId: string;
-	indexers: {
-		id: string;
-		name: string;
-		model: string;
-		dimensions: number;
-		isDefault: boolean;
-	}[];
+	action: DialogAction;
+	indexers: Indexer[];
+	open: boolean;
+	onOpenChange: (open: boolean) => void;
 	onJobStarted?: (jobId: string, initialMessage?: string) => void;
 }) {
-	const [open, setOpen] = useState(false);
-	const [selectedId, setSelectedId] = useState("");
+	const [selectedId, setSelectedId] = useState(
+		() => indexers.find((e) => e.isDefault)?.id ?? indexers[0]?.id ?? ""
+	);
 
-	const indexMutation = useMutation({
+	const reindexMutation = useMutation({
 		mutationFn: () =>
 			trpcClient.library.reindexVideo.mutate({
 				videoId,
@@ -47,33 +62,39 @@ function IndexVideoDialog({
 			onJobStarted?.(data.jobId, data.progressMessage);
 			queryClient.invalidateQueries({ queryKey: [["job", "list"]] });
 			queryClient.invalidateQueries({ queryKey: [["library", "videos"]] });
-			setOpen(false);
+			onOpenChange(false);
 		},
-		onError: (err) => {
-			toast.error(err.message);
-		},
+		onError: (err) => toast.error(err.message),
 	});
 
-	const handleOpen = (next: boolean) => {
-		setOpen(next);
-		if (next) {
-			const def = indexers.find((e) => e.isDefault);
-			setSelectedId(def?.id ?? indexers[0]?.id ?? "");
-		}
-	};
+	const regenMutation = useMutation({
+		mutationFn: () =>
+			trpcClient.library.regenerateThumbnails.mutate({
+				videoId,
+				indexerId: selectedId,
+			}),
+		onSuccess: (data) => {
+			toast.success("Thumbnail regeneration started");
+			onJobStarted?.(data.jobId, data.progressMessage);
+			queryClient.invalidateQueries({ queryKey: [["job", "list"]] });
+			onOpenChange(false);
+		},
+		onError: (err) => toast.error(err.message),
+	});
+
+	const isPending = reindexMutation.isPending || regenMutation.isPending;
+	const isReindex = action === "reindex";
+	const title = isReindex ? "Reindex Video" : "Regenerate Thumbnails";
+	const buttonLabel = isReindex ? "Start Indexing" : "Regenerate";
+	const handleSubmit = isReindex
+		? () => reindexMutation.mutate()
+		: () => regenMutation.mutate();
 
 	return (
-		<Dialog onOpenChange={handleOpen} open={open}>
-			<DialogTrigger
-				render={
-					<Button size="xs" variant="outline">
-						Index
-					</Button>
-				}
-			/>
+		<Dialog onOpenChange={onOpenChange} open={open}>
 			<DialogContent>
 				<DialogHeader>
-					<DialogTitle>Index Video</DialogTitle>
+					<DialogTitle>{title}</DialogTitle>
 				</DialogHeader>
 				<div className="flex flex-col gap-3">
 					<NativeSelect
@@ -88,19 +109,14 @@ function IndexVideoDialog({
 							</NativeSelectOption>
 						))}
 					</NativeSelect>
-					<Button
-						disabled={!selectedId || indexMutation.isPending}
-						onClick={() => indexMutation.mutate()}
-					>
-						{indexMutation.isPending ? "Starting..." : "Start Indexing"}
+					<Button disabled={!selectedId || isPending} onClick={handleSubmit}>
+						{isPending ? "Starting..." : buttonLabel}
 					</Button>
 				</div>
 			</DialogContent>
 		</Dialog>
 	);
 }
-
-// --- Video Row ---
 
 export function VideoRow({
 	libraryId,
@@ -114,15 +130,11 @@ export function VideoRow({
 		fileName: string;
 		indexedBy: string[];
 	};
-	indexers: {
-		id: string;
-		name: string;
-		model: string;
-		dimensions: number;
-		isDefault: boolean;
-	}[];
+	indexers: Indexer[];
 	onJobStarted?: (jobId: string, initialMessage?: string) => void;
 }) {
+	const [dialogAction, setDialogAction] = useState<DialogAction | null>(null);
+
 	return (
 		<div className="flex items-center justify-between py-2">
 			<div className="min-w-0 flex-1">
@@ -141,15 +153,44 @@ export function VideoRow({
 					)}
 				</div>
 			</div>
-			<div className="ml-2 flex items-center gap-2">
-				{indexers.length > 0 && (
-					<IndexVideoDialog
-						indexers={indexers}
-						onJobStarted={onJobStarted}
-						videoId={video.id}
-					/>
-				)}
-			</div>
+			{indexers.length > 0 && (
+				<div className="ml-2 flex items-center gap-2">
+					<DropdownMenu>
+						<DropdownMenuTrigger
+							render={
+								<Button size="icon" variant="ghost">
+									<MoreHorizontal className="size-4" />
+								</Button>
+							}
+						/>
+						<DropdownMenuContent align="end">
+							<DropdownMenuItem onClick={() => setDialogAction("reindex")}>
+								Reindex
+							</DropdownMenuItem>
+							<DropdownMenuItem
+								onClick={() => setDialogAction("regenerate_thumbnails")}
+							>
+								Regenerate Thumbnails
+							</DropdownMenuItem>
+						</DropdownMenuContent>
+					</DropdownMenu>
+
+					{dialogAction && (
+						<ActionDialog
+							action={dialogAction}
+							indexers={indexers}
+							onJobStarted={onJobStarted}
+							onOpenChange={(open) => {
+								if (!open) {
+									setDialogAction(null);
+								}
+							}}
+							open
+							videoId={video.id}
+						/>
+					)}
+				</div>
+			)}
 		</div>
 	);
 }

@@ -2,6 +2,10 @@ import { Context, type Effect } from "effect";
 
 export interface ThumbnailCacheShape {
 	readonly clear: () => Effect.Effect<void>;
+	readonly generateForVideo: (
+		videoPath: string,
+		seconds: number
+	) => Effect.Effect<void>;
 	readonly generateFromChunk: (
 		videoPath: string,
 		chunkPath: string,

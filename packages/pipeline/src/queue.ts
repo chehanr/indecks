@@ -179,7 +179,8 @@ const runJob = (db: Db, jobRow: typeof jobTable.$inferSelect) =>
 				jobType: jobRow.type as
 					| "scan_library"
 					| "index_library"
-					| "index_video",
+					| "index_video"
+					| "regenerate_thumbnails",
 				libraryId: jobRow.libraryId,
 				videoId: jobRow.videoId,
 				indexerId: jobRow.indexerId,

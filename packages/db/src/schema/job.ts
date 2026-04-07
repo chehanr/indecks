@@ -6,7 +6,12 @@ export const job = sqliteTable(
 	{
 		id: text("id").primaryKey(),
 		type: text("type", {
-			enum: ["scan_library", "index_video", "index_library"],
+			enum: [
+				"scan_library",
+				"index_video",
+				"index_library",
+				"regenerate_thumbnails",
+			],
 		}).notNull(),
 		status: text("status", {
 			enum: ["pending", "running", "completed", "failed", "cancelled"],
