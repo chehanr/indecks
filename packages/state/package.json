@@ -7,7 +7,7 @@
     }
   },
   "dependencies": {
-    "xstate": "^5.30.0"
+    "xstate": "catalog:"
   },
   "devDependencies": {
     "@indecks/config": "workspace:*",

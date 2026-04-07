@@ -29,7 +29,8 @@
       "@effect/platform-bun": "^0.89.0",
       "date-fns": "^4.1.0",
       "nanoid": "^5.1.5",
-      "drizzle-orm": "^0.45.2"
+      "drizzle-orm": "^0.45.2",
+      "xstate": "^5.30.0"
     }
   },
   "type": "module",

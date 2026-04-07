@@ -13,7 +13,8 @@
     "@indecks/vector": "workspace:*",
     "drizzle-orm": "catalog:",
     "effect": "catalog:",
-    "nanoid": "catalog:"
+    "nanoid": "catalog:",
+    "xstate": "catalog:"
   },
   "devDependencies": {
     "@indecks/config": "workspace:*",
