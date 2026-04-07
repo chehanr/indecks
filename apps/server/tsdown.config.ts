@@ -6,5 +6,5 @@ export default defineConfig({
 	outDir: "./dist",
 	clean: true,
 	external: ["bun:sqlite"],
-	noExternal: [/@indecks\/.*/],
+	noExternal: [/@indecks\/.*/, "xstate"],
 });
