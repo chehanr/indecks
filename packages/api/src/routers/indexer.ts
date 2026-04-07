@@ -1,9 +1,13 @@
 import { DbService } from "@indecks/db";
+import { chunk as chunkTable } from "@indecks/db/schema/chunk";
 import { indexer as indexerTable } from "@indecks/db/schema/indexer";
+import { video as videoTable } from "@indecks/db/schema/video";
 import { EmbedService } from "@indecks/pipeline/embedder";
 import { IndexerNotFoundError } from "@indecks/pipeline/errors";
+import { canTransitionVideo } from "@indecks/state/transition";
+import type { VideoStatus } from "@indecks/state/types";
 import { VectorDbManagerService } from "@indecks/vector";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { Effect } from "effect";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -170,11 +174,64 @@ export const indexerRouter = router({
 						});
 					}
 
+					// Find videos that have chunks from this indexer
+					const affectedVideos = yield* Effect.promise(() =>
+						db
+							.selectDistinct({ videoId: chunkTable.videoId })
+							.from(chunkTable)
+							.where(eq(chunkTable.indexerId, input.id))
+							.all()
+					);
+
 					yield* vectorDbManager.remove(existing.libraryId, existing.id);
 
+					// Cascade delete removes chunks for this indexer
 					yield* Effect.promise(() =>
 						db.delete(indexerTable).where(eq(indexerTable.id, input.id))
 					);
+
+					// Reset videos that no longer have any embedded chunks
+					if (affectedVideos.length > 0) {
+						const videoIds = affectedVideos.map((v) => v.videoId);
+						const remainingChunks = yield* Effect.promise(() =>
+							db
+								.selectDistinct({ videoId: chunkTable.videoId })
+								.from(chunkTable)
+								.where(
+									and(
+										inArray(chunkTable.videoId, videoIds),
+										eq(chunkTable.embeddingStatus, "embedded")
+									)
+								)
+								.all()
+						);
+						const stillIndexed = new Set(remainingChunks.map((c) => c.videoId));
+						const orphanedIds = videoIds.filter((id) => !stillIndexed.has(id));
+						if (orphanedIds.length > 0) {
+							const orphanedVideos = yield* Effect.promise(() =>
+								db
+									.select({ id: videoTable.id, status: videoTable.status })
+									.from(videoTable)
+									.where(inArray(videoTable.id, orphanedIds))
+									.all()
+							);
+							const resettableIds = orphanedVideos
+								.filter((v) =>
+									canTransitionVideo(v.status as VideoStatus, {
+										type: "RESET",
+									})
+								)
+								.map((v) => v.id);
+							if (resettableIds.length > 0) {
+								yield* Effect.promise(() =>
+									db
+										.update(videoTable)
+										.set({ status: "pending", errorMessage: null })
+										.where(inArray(videoTable.id, resettableIds))
+								);
+							}
+						}
+					}
 
 					return { success: true };
 				})

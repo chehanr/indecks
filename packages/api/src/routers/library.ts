@@ -8,10 +8,13 @@ import { video as videoTable } from "@indecks/db/schema/video";
 import {
 	FolderNotAccessibleError,
 	IndexerNotFoundError,
+	LibraryBusyError,
 	LibraryNotFoundError,
 	VideoNotFoundError,
 } from "@indecks/pipeline/errors";
 import { ThumbnailCacheService } from "@indecks/pipeline/thumbnail-cache";
+import { canTransitionLibrary } from "@indecks/state/transition";
+import type { LibraryStatus } from "@indecks/state/types";
 import { VectorDbManagerService } from "@indecks/vector";
 import { and, count, eq, inArray, like } from "drizzle-orm";
 import { Effect } from "effect";
@@ -219,6 +222,24 @@ export const libraryRouter = router({
 						});
 					}
 
+					if (
+						!canTransitionLibrary(lib.status as LibraryStatus, {
+							type: "START_SCAN",
+						})
+					) {
+						return yield* new LibraryBusyError({
+							libraryId: input.id,
+							currentStatus: lib.status,
+						});
+					}
+
+					yield* Effect.promise(() =>
+						db
+							.update(libraryTable)
+							.set({ status: "scanning" })
+							.where(eq(libraryTable.id, input.id))
+					);
+
 					const jobId = nanoid();
 					yield* Effect.promise(() =>
 						db.insert(jobTable).values({
@@ -277,6 +298,17 @@ export const libraryRouter = router({
 						});
 					}
 
+					if (
+						!canTransitionLibrary(lib.status as LibraryStatus, {
+							type: "START_INDEXING",
+						})
+					) {
+						return yield* new LibraryBusyError({
+							libraryId: input.id,
+							currentStatus: lib.status,
+						});
+					}
+
 					if (input.force) {
 						yield* Effect.promise(() =>
 							db
@@ -306,6 +338,13 @@ export const libraryRouter = router({
 								.where(eq(videoTable.libraryId, input.id))
 						);
 					}
+
+					yield* Effect.promise(() =>
+						db
+							.update(libraryTable)
+							.set({ status: "indexing" })
+							.where(eq(libraryTable.id, input.id))
+					);
 
 					const jobId = nanoid();
 					yield* Effect.promise(() =>

@@ -7,6 +7,11 @@ import { indexer as indexerTable } from "@indecks/db/schema/indexer";
 import { job as jobTable } from "@indecks/db/schema/job";
 import { library as libraryTable } from "@indecks/db/schema/library";
 import { video as videoTable } from "@indecks/db/schema/video";
+import {
+	canTransitionLibrary,
+	canTransitionVideo,
+} from "@indecks/state/transition";
+import type { LibraryStatus, VideoStatus } from "@indecks/state/types";
 import type { VectorDb, VectorDbManagerShape } from "@indecks/vector";
 import { and, eq, inArray } from "drizzle-orm";
 import { Context, Duration, Effect, Layer, Queue } from "effect";
@@ -261,12 +266,18 @@ export const ProcessorServiceLive = Layer.effect(
 					`Starting scan for library ${lib.name} (${libraryId})`
 				);
 
-				yield* Effect.promise(() =>
-					db
-						.update(libraryTable)
-						.set({ status: "scanning" })
-						.where(eq(libraryTable.id, libraryId))
-				);
+				if (
+					canTransitionLibrary(lib.status as LibraryStatus, {
+						type: "START_SCAN",
+					})
+				) {
+					yield* Effect.promise(() =>
+						db
+							.update(libraryTable)
+							.set({ status: "scanning" })
+							.where(eq(libraryTable.id, libraryId))
+					);
+				}
 
 				// Phase 1: Walk filesystem (indefinite progress)
 				const folderPaths: string[] = JSON.parse(lib.folderPaths);
@@ -659,12 +670,16 @@ export const ProcessorServiceLive = Layer.effect(
 					downscaleFps: emb.downscaleFps,
 				};
 
-				yield* Effect.promise(() =>
-					db
-						.update(videoTable)
-						.set({ status: "processing" })
-						.where(eq(videoTable.id, videoId))
-				);
+				if (
+					canTransitionVideo(vid.status as VideoStatus, { type: "PROCESS" })
+				) {
+					yield* Effect.promise(() =>
+						db
+							.update(videoTable)
+							.set({ status: "processing" })
+							.where(eq(videoTable.id, videoId))
+					);
+				}
 
 				yield* progress(onProgress, 0, `Indexing: ${vid.fileName}`);
 				yield* processVideoForIndexer(db, vid, indexer, onProgress);
@@ -755,12 +770,16 @@ export const ProcessorServiceLive = Layer.effect(
 					}
 				}
 
-				yield* Effect.promise(() =>
-					db
-						.update(videoTable)
-						.set({ status: "processing" })
-						.where(eq(videoTable.id, vid.id))
-				);
+				if (
+					canTransitionVideo(vid.status as VideoStatus, { type: "PROCESS" })
+				) {
+					yield* Effect.promise(() =>
+						db
+							.update(videoTable)
+							.set({ status: "processing" })
+							.where(eq(videoTable.id, vid.id))
+					);
+				}
 
 				yield* processVideoForIndexer(db, vid, indexer, onProgress);
 
@@ -897,12 +916,26 @@ export const ProcessorServiceLive = Layer.effect(
 					`Starting indexing for library ${libraryId} with indexer ${indexerId}`
 				);
 
-				yield* Effect.promise(() =>
+				const lib = yield* Effect.promise(() =>
 					db
-						.update(libraryTable)
-						.set({ status: "indexing" })
+						.select({ status: libraryTable.status })
+						.from(libraryTable)
 						.where(eq(libraryTable.id, libraryId))
+						.get()
 				);
+				if (
+					lib &&
+					canTransitionLibrary(lib.status as LibraryStatus, {
+						type: "START_INDEXING",
+					})
+				) {
+					yield* Effect.promise(() =>
+						db
+							.update(libraryTable)
+							.set({ status: "indexing" })
+							.where(eq(libraryTable.id, libraryId))
+					);
+				}
 
 				const videos = yield* Effect.promise(() =>
 					db

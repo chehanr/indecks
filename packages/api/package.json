@@ -16,11 +16,12 @@
     "@indecks/auth": "workspace:*",
     "@indecks/db": "workspace:*",
     "@indecks/pipeline": "workspace:*",
+    "@indecks/state": "workspace:*",
     "@indecks/vector": "workspace:*",
     "@trpc/server": "catalog:",
     "drizzle-orm": "catalog:",
     "effect": "catalog:",
-    "nanoid": "^5.1.5",
+    "nanoid": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {

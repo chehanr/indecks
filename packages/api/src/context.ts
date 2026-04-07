@@ -42,7 +42,7 @@ export const makeAppLayer = (
 			)
 		)
 	);
-	const JobQueueLayer = JobQueueServiceLive.pipe(Layer.provide(ProcessorLayer));
+	const JobQueueLayer = JobQueueServiceLive;
 
 	return Layer.mergeAll(
 		ConfigLayer,

@@ -546,6 +546,7 @@ export function IndexerCard({
 			toast.success(`Indexing started with ${indexer.name}`);
 			onJobStarted?.(data.jobId);
 			queryClient.invalidateQueries({ queryKey: [["job", "list"]] });
+			queryClient.invalidateQueries({ queryKey: [["library", "get"]] });
 		},
 		onError: (err) => {
 			toast.error(err.message);

@@ -1,0 +1,17 @@
+{
+  "name": "@indecks/state",
+  "type": "module",
+  "exports": {
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "dependencies": {
+    "xstate": "^5.30.0"
+  },
+  "devDependencies": {
+    "@indecks/config": "workspace:*",
+    "@types/bun": "catalog:",
+    "typescript": "^5"
+  }
+}
