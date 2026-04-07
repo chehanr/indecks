@@ -9,10 +9,12 @@ import { AuthService } from "@indecks/auth";
 import { DbService } from "@indecks/db";
 import { indexer as indexerTable } from "@indecks/db/schema/indexer";
 import { env } from "@indecks/env/server";
+import { ProcessorService } from "@indecks/pipeline/processor";
 import {
 	JobQueueService,
 	setJobProgressCallback,
 } from "@indecks/pipeline/queue";
+import { setJobExecutor } from "@indecks/state/bridge";
 import { VectorDbManagerService } from "@indecks/vector";
 import { migrate } from "drizzle-orm/libsql/migrator";
 import { Effect, Fiber, ManagedRuntime, Schedule } from "effect";
@@ -88,6 +90,59 @@ setJobProgressCallback(
 	}
 );
 
+setJobExecutor(async (input, callbacks) => {
+	await appRuntime.runPromise(
+		Effect.gen(function* () {
+			const processor = yield* ProcessorService;
+			const db = yield* DbService;
+			const vectorDbManager = yield* VectorDbManagerService;
+
+			const onProgress = (progress: number, message: string) =>
+				Effect.sync(() => callbacks.onProgress(progress, message));
+
+			switch (input.jobType) {
+				case "scan_library": {
+					if (!input.libraryId) {
+						throw new Error("scan_library requires libraryId");
+					}
+					yield* processor.scanLibraryFolder(db, input.libraryId, onProgress);
+					break;
+				}
+				case "index_video": {
+					if (!(input.videoId && input.indexerId)) {
+						throw new Error("index_video requires videoId and indexerId");
+					}
+					yield* processor.processVideo(
+						db,
+						input.videoId,
+						input.indexerId,
+						vectorDbManager,
+						input.jobId,
+						onProgress
+					);
+					break;
+				}
+				case "index_library": {
+					if (!(input.libraryId && input.indexerId)) {
+						throw new Error("index_library requires libraryId and indexerId");
+					}
+					yield* processor.indexLibrary(
+						db,
+						vectorDbManager,
+						input.libraryId,
+						input.indexerId,
+						input.jobId,
+						onProgress
+					);
+					break;
+				}
+				default:
+					throw new Error(`Unknown job type: ${input.jobType}`);
+			}
+		})
+	);
+});
+
 await appRuntime.runPromise(
 	Effect.gen(function* () {
 		const jobQueue = yield* JobQueueService;
@@ -105,8 +160,7 @@ const workerFiber = appRuntime.runFork(
 		yield* Effect.logInfo("Worker fiber started");
 		const jobQueue = yield* JobQueueService;
 		const db = yield* DbService;
-		const vectorDbManager = yield* VectorDbManagerService;
-		yield* jobQueue.startWorker(db, vectorDbManager);
+		yield* jobQueue.startWorker(db);
 		yield* Effect.logWarning("Worker fiber exited unexpectedly");
 	}).pipe(
 		Effect.catchAllCause((cause) =>

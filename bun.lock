@@ -29,6 +29,7 @@
         "@indecks/db": "workspace:*",
         "@indecks/env": "workspace:*",
         "@indecks/pipeline": "workspace:*",
+        "@indecks/state": "workspace:*",
         "@indecks/vector": "workspace:*",
         "drizzle-orm": "catalog:",
         "effect": "catalog:",
@@ -169,7 +170,6 @@
     "packages/state": {
       "name": "@indecks/state",
       "dependencies": {
-        "effect": "catalog:",
         "xstate": "^5.30.0",
       },
       "devDependencies": {

@@ -7,7 +7,6 @@
     }
   },
   "dependencies": {
-    "effect": "catalog:",
     "xstate": "^5.30.0"
   },
   "devDependencies": {

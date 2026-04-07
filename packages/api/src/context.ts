@@ -8,7 +8,6 @@ import { FFmpegServiceLive } from "@indecks/pipeline/ffmpeg";
 import { ProcessorServiceLive } from "@indecks/pipeline/processor";
 import { JobQueueServiceLive } from "@indecks/pipeline/queue";
 import type { ThumbnailCacheService } from "@indecks/pipeline/thumbnail-cache";
-import { ActorManagerServiceLive } from "@indecks/state/effect-bridge";
 import { VectorDbManagerServiceLive } from "@indecks/vector";
 import { Effect, Layer, type ManagedRuntime } from "effect";
 import type { Context as HonoContext } from "hono";
@@ -32,7 +31,6 @@ export const makeAppLayer = (
 	);
 	const EmbedLayer = EmbedServiceLive.pipe(Layer.provide(PlatformLayer));
 	const FFmpegLayer = FFmpegServiceLive.pipe(Layer.provide(PlatformLayer));
-	const ActorManagerLayer = ActorManagerServiceLive;
 	const ProcessorLayer = ProcessorServiceLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
@@ -44,9 +42,7 @@ export const makeAppLayer = (
 			)
 		)
 	);
-	const JobQueueLayer = JobQueueServiceLive.pipe(
-		Layer.provide(Layer.merge(ProcessorLayer, ActorManagerLayer))
-	);
+	const JobQueueLayer = JobQueueServiceLive;
 
 	return Layer.mergeAll(
 		ConfigLayer,
@@ -58,7 +54,6 @@ export const makeAppLayer = (
 		FFmpegLayer,
 		ProcessorLayer,
 		JobQueueLayer,
-		ActorManagerLayer,
 		thumbCacheLayer
 	);
 };
