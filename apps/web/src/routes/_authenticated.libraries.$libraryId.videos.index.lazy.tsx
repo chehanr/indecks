@@ -95,6 +95,7 @@ function VideosPage() {
 			toast.success("Scan started");
 			trackJob(data.jobId);
 			queryClient.invalidateQueries({ queryKey: [["job", "list"]] });
+			queryClient.invalidateQueries({ queryKey: [["library", "get"]] });
 		},
 		onError: (err) => {
 			toast.error(err.message);

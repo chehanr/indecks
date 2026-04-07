@@ -1,12 +1,10 @@
 import type { Db } from "@indecks/db";
-import { indexer as indexerTable } from "@indecks/db/schema/indexer";
 import { job as jobTable } from "@indecks/db/schema/job";
 import { library as libraryTable } from "@indecks/db/schema/library";
 import { video as videoTable } from "@indecks/db/schema/video";
 import { jobMachine } from "@indecks/state/machines/job";
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { Context, Effect, Layer, Schedule } from "effect";
-import { nanoid } from "nanoid";
 import { createActor, toPromise } from "xstate";
 
 export type JobProgressCallback = (
@@ -245,7 +243,7 @@ const runJob = (db: Db, jobRow: typeof jobTable.$inferSelect) =>
 	});
 
 export interface JobQueueServiceShape {
-	readonly recoverStaleJobs: (db: Db) => Effect.Effect<number>;
+	readonly failStaleJobs: (db: Db) => Effect.Effect<number>;
 	readonly startWorker: (db: Db) => Effect.Effect<void>;
 }
 
@@ -255,27 +253,25 @@ export class JobQueueService extends Context.Tag("JobQueueService")<
 >() {}
 
 export const JobQueueServiceLive = Layer.succeed(JobQueueService, {
-	recoverStaleJobs: (db) =>
+	failStaleJobs: (db) =>
 		Effect.gen(function* () {
-			// Finalize cancelled jobs that were interrupted mid-cleanup
-			yield* Effect.promise(() =>
-				db
-					.update(jobTable)
-					.set({ completedAt: new Date() })
-					.where(eq(jobTable.status, "cancelled"))
-			);
+			const errorMsg = "Server restarted while job was running";
 
-			// Reset running jobs to pending for re-processing
+			// Fail running and cancelled jobs
 			const result = yield* Effect.promise(() =>
 				db
 					.update(jobTable)
 					.set({
-						status: "pending",
-						progressMessage: "Recovered after server restart",
+						status: "failed",
+						errorMessage: errorMsg,
+						completedAt: new Date(),
 					})
-					.where(eq(jobTable.status, "running"))
+					.where(
+						or(eq(jobTable.status, "running"), eq(jobTable.status, "cancelled"))
+					)
 			);
 
+			// Reset in-flight video statuses
 			yield* Effect.promise(() =>
 				db
 					.update(videoTable)
@@ -283,6 +279,7 @@ export const JobQueueServiceLive = Layer.succeed(JobQueueService, {
 					.where(eq(videoTable.status, "processing"))
 			);
 
+			// Reset in-flight library statuses
 			yield* Effect.promise(() =>
 				db
 					.update(libraryTable)
@@ -295,73 +292,10 @@ export const JobQueueServiceLive = Layer.succeed(JobQueueService, {
 					)
 			);
 
-			// Create jobs for orphaned pending videos (no active job)
-			const pendingVideos = yield* Effect.promise(() =>
-				db
-					.select({ libraryId: videoTable.libraryId })
-					.from(videoTable)
-					.where(eq(videoTable.status, "pending"))
-					.all()
-			);
-			const orphanLibraryIds = [
-				...new Set(pendingVideos.map((v) => v.libraryId)),
-			];
-
-			if (orphanLibraryIds.length > 0) {
-				const skipJobs = yield* Effect.promise(() =>
-					db
-						.select({
-							libraryId: jobTable.libraryId,
-						})
-						.from(jobTable)
-						.where(
-							and(
-								inArray(jobTable.libraryId, orphanLibraryIds),
-								or(
-									eq(jobTable.status, "pending"),
-									eq(jobTable.status, "running"),
-									eq(jobTable.status, "cancelled")
-								)
-							)
-						)
-						.all()
-				);
-				const skipLibIds = new Set(skipJobs.map((j) => j.libraryId));
-
-				for (const libId of orphanLibraryIds) {
-					if (skipLibIds.has(libId)) {
-						continue;
-					}
-
-					const idxr = yield* Effect.promise(() =>
-						db
-							.select({ id: indexerTable.id })
-							.from(indexerTable)
-							.where(eq(indexerTable.libraryId, libId))
-							.limit(1)
-							.get()
-					);
-					if (!idxr) {
-						continue;
-					}
-
-					yield* Effect.promise(() =>
-						db.insert(jobTable).values({
-							id: nanoid(),
-							type: "index_library",
-							libraryId: libId,
-							indexerId: idxr.id,
-							status: "pending",
-							progressMessage: "Auto-recovery for pending videos",
-						})
-					);
-				}
-			}
-
 			return result.rowsAffected;
 		}).pipe(
 			Effect.catchAll((err) =>
-				Effect.logError(`Stale job recovery failed: ${err}`).pipe(Effect.as(0))
+				Effect.logError(`Stale job cleanup failed: ${err}`).pipe(Effect.as(0))
 			)
 		),
 

@@ -233,6 +233,13 @@ export const libraryRouter = router({
 						});
 					}
 
+					yield* Effect.promise(() =>
+						db
+							.update(libraryTable)
+							.set({ status: "scanning" })
+							.where(eq(libraryTable.id, input.id))
+					);
+
 					const jobId = nanoid();
 					yield* Effect.promise(() =>
 						db.insert(jobTable).values({
@@ -331,6 +338,13 @@ export const libraryRouter = router({
 								.where(eq(videoTable.libraryId, input.id))
 						);
 					}
+
+					yield* Effect.promise(() =>
+						db
+							.update(libraryTable)
+							.set({ status: "indexing" })
+							.where(eq(libraryTable.id, input.id))
+					);
 
 					const jobId = nanoid();
 					yield* Effect.promise(() =>

@@ -148,9 +148,9 @@ await appRuntime.runPromise(
 		const jobQueue = yield* JobQueueService;
 		const db = yield* DbService;
 
-		const recovered = yield* jobQueue.recoverStaleJobs(db);
-		if (recovered > 0) {
-			yield* Effect.logInfo(`Recovered ${recovered} stale jobs`);
+		const failed = yield* jobQueue.failStaleJobs(db);
+		if (failed > 0) {
+			yield* Effect.logInfo(`Marked ${failed} stale jobs as failed`);
 		}
 	})
 );
