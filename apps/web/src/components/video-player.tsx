@@ -27,6 +27,7 @@ export function VideoPlayer({
 	const [muted, setMuted] = useState(true);
 	const [progress, setProgress] = useState(0);
 	const [loaded, setLoaded] = useState(false);
+	const [showPoster, setShowPoster] = useState(true);
 
 	useEffect(() => {
 		const video = videoRef.current;
@@ -56,6 +57,7 @@ export function VideoPlayer({
 
 		const handlePlay = () => {
 			setPlaying(true);
+			setShowPoster(false);
 			rafId = requestAnimationFrame(tick);
 		};
 
@@ -128,11 +130,26 @@ export function VideoPlayer({
 
 	return (
 		<div className="group relative aspect-video overflow-hidden rounded-md">
+			{showPoster && (
+				<button
+					className="absolute inset-0 size-full border-0 bg-transparent p-0"
+					onClick={togglePlay}
+					type="button"
+				>
+					<img
+						alt="Video thumbnail"
+						className="size-full object-contain"
+						height={180}
+						loading="lazy"
+						src={poster}
+						width={320}
+					/>
+				</button>
+			)}
 			<video
 				className="size-full object-contain"
 				muted={muted}
 				onClick={togglePlay}
-				poster={poster}
 				preload="none"
 				ref={videoRef}
 				src={src}

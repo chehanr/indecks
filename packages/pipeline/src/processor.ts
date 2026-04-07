@@ -489,6 +489,13 @@ export const ProcessorServiceLive = Layer.effect(
 
 						yield* insertChunkRecord(chunkInfo);
 
+						// Generate thumbnail from chunk before it's deleted
+						yield* thumbCache.generateFromChunk(
+							vid.filePath,
+							chunkInfo.chunkPath,
+							chunkInfo.startTime
+						);
+
 						// Read chunk with Bun's zero-copy file I/O and delete immediately
 						const videoBuffer = yield* Effect.promise(() =>
 							Bun.file(chunkInfo.chunkPath)
@@ -681,6 +688,7 @@ export const ProcessorServiceLive = Layer.effect(
 					);
 				}
 
+				yield* thumbCache.removeByPaths([vid.filePath]);
 				yield* progress(onProgress, 0, `Indexing: ${vid.fileName}`);
 				yield* processVideoForIndexer(db, vid, indexer, onProgress);
 
@@ -748,6 +756,7 @@ export const ProcessorServiceLive = Layer.effect(
 							)
 						)
 				);
+				yield* thumbCache.removeByPaths([vid.filePath]);
 
 				// Lazily resolve duration if not set during scan
 				if (vid.duration === null) {

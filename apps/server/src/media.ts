@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { basename, resolve } from "node:path";
@@ -6,73 +5,6 @@ import { basename, resolve } from "node:path";
 import type { Auth } from "@indecks/auth";
 
 const RANGE_PATTERN = /bytes=(\d+)-(\d*)/;
-
-const MAX_CONCURRENT_THUMBNAILS = 3;
-let activeThumbCount = 0;
-const thumbQueue: Array<() => void> = [];
-const thumbLocks = new Map<string, Promise<number | null>>();
-
-function acquireThumbSlot(): Promise<void> {
-	if (activeThumbCount < MAX_CONCURRENT_THUMBNAILS) {
-		activeThumbCount++;
-		return Promise.resolve();
-	}
-	return new Promise<void>((resolve) => {
-		thumbQueue.push(resolve);
-	});
-}
-
-function releaseThumbSlot(): void {
-	const next = thumbQueue.shift();
-	if (next) {
-		next();
-	} else {
-		activeThumbCount--;
-	}
-}
-
-function generateThumbnail(
-	absPath: string,
-	thumbPath: string,
-	seconds: number
-): Promise<number | null> {
-	const existing = thumbLocks.get(thumbPath);
-	if (existing) {
-		return existing;
-	}
-
-	const promise = acquireThumbSlot()
-		.then(
-			() =>
-				new Promise<number | null>((res) => {
-					const proc = spawn("ffmpeg", [
-						"-nostdin",
-						"-ss",
-						String(seconds),
-						"-i",
-						absPath,
-						"-frames:v",
-						"1",
-						"-vf",
-						"scale=320:-2",
-						"-q:v",
-						"6",
-						"-y",
-						thumbPath,
-					]);
-					proc.stdout.resume();
-					proc.stderr.resume();
-					proc.on("close", res);
-				})
-		)
-		.finally(() => {
-			releaseThumbSlot();
-			thumbLocks.delete(thumbPath);
-		});
-
-	thumbLocks.set(thumbPath, promise);
-	return promise;
-}
 
 interface MediaHandlerOptions {
 	auth: Auth;
@@ -221,25 +153,13 @@ export function createMediaHandlers(opts: MediaHandlerOptions) {
 			.slice(0, 16);
 		const thumbPath = resolve(thumbnailDir, `${pathHash}_${seconds}.jpg`);
 
-		const thumbExists = await stat(thumbPath)
-			.then(() => true)
-			.catch(() => false);
-
-		if (!thumbExists) {
-			const exitCode = await generateThumbnail(
-				result.absPath,
-				thumbPath,
-				seconds
-			);
-			if (exitCode !== 0) {
-				return new Response("Thumbnail generation failed", {
-					status: 500,
-					headers: corsHeaders,
-				});
-			}
+		const thumbStat = await stat(thumbPath).catch(() => null);
+		if (!thumbStat) {
+			return new Response("Thumbnail not found", {
+				status: 404,
+				headers: corsHeaders,
+			});
 		}
-
-		const thumbStat = await stat(thumbPath);
 		const thumbEtag = `"thumb-${thumbStat.mtimeMs.toString(36)}"`;
 
 		if (req.headers.get("If-None-Match") === thumbEtag) {
