@@ -16,7 +16,9 @@ import { JobProgress } from "@/components/job-progress";
 import { LibraryContext } from "@/hooks/use-library";
 import { trpc, trpcClient } from "@/utils/trpc";
 
-export const Route = createLazyFileRoute("/libraries/$libraryId")({
+export const Route = createLazyFileRoute(
+	"/_authenticated/libraries/$libraryId"
+)({
 	component: LibraryLayout,
 });
 

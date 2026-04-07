@@ -5,6 +5,8 @@ const videoSearchSchema = z.object({
 	start: z.number().optional(),
 });
 
-export const Route = createFileRoute("/libraries/$libraryId/videos/$videoId")({
+export const Route = createFileRoute(
+	"/_authenticated/libraries/$libraryId/videos/$videoId"
+)({
 	validateSearch: videoSearchSchema,
 });

@@ -1,6 +1,8 @@
 import { createFileRoute, Outlet } from "@tanstack/react-router";
 
-export const Route = createFileRoute("/libraries/$libraryId/videos")({
+export const Route = createFileRoute(
+	"/_authenticated/libraries/$libraryId/videos"
+)({
 	component: VideosLayout,
 });
 

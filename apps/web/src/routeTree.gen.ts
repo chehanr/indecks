@@ -10,18 +10,23 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as LibrariesIndexRouteImport } from './routes/libraries.index'
-import { Route as LibrariesLibraryIdRouteImport } from './routes/libraries.$libraryId'
-import { Route as LibrariesLibraryIdIndexRouteImport } from './routes/libraries.$libraryId.index'
-import { Route as LibrariesLibraryIdVideosRouteImport } from './routes/libraries.$libraryId.videos'
-import { Route as LibrariesLibraryIdSettingsRouteImport } from './routes/libraries.$libraryId.settings'
-import { Route as LibrariesLibraryIdVideosIndexRouteImport } from './routes/libraries.$libraryId.videos.index'
-import { Route as LibrariesLibraryIdVideosVideoIdRouteImport } from './routes/libraries.$libraryId.videos.$videoId'
+import { Route as AuthenticatedLibrariesIndexRouteImport } from './routes/_authenticated.libraries.index'
+import { Route as AuthenticatedLibrariesLibraryIdRouteImport } from './routes/_authenticated.libraries.$libraryId'
+import { Route as AuthenticatedLibrariesLibraryIdIndexRouteImport } from './routes/_authenticated.libraries.$libraryId.index'
+import { Route as AuthenticatedLibrariesLibraryIdVideosRouteImport } from './routes/_authenticated.libraries.$libraryId.videos'
+import { Route as AuthenticatedLibrariesLibraryIdSettingsRouteImport } from './routes/_authenticated.libraries.$libraryId.settings'
+import { Route as AuthenticatedLibrariesLibraryIdVideosIndexRouteImport } from './routes/_authenticated.libraries.$libraryId.videos.index'
+import { Route as AuthenticatedLibrariesLibraryIdVideosVideoIdRouteImport } from './routes/_authenticated.libraries.$libraryId.videos.$videoId'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedRoute = AuthenticatedRouteImport.update({
+  id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -29,58 +34,67 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const LibrariesIndexRoute = LibrariesIndexRouteImport.update({
-  id: '/libraries/',
-  path: '/libraries/',
-  getParentRoute: () => rootRouteImport,
-} as any).lazy(() =>
-  import('./routes/libraries.index.lazy').then((d) => d.Route),
-)
-const LibrariesLibraryIdRoute = LibrariesLibraryIdRouteImport.update({
-  id: '/libraries/$libraryId',
-  path: '/libraries/$libraryId',
-  getParentRoute: () => rootRouteImport,
-} as any).lazy(() =>
-  import('./routes/libraries.$libraryId.lazy').then((d) => d.Route),
-)
-const LibrariesLibraryIdIndexRoute = LibrariesLibraryIdIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => LibrariesLibraryIdRoute,
-} as any).lazy(() =>
-  import('./routes/libraries.$libraryId.index.lazy').then((d) => d.Route),
-)
-const LibrariesLibraryIdVideosRoute =
-  LibrariesLibraryIdVideosRouteImport.update({
-    id: '/videos',
-    path: '/videos',
-    getParentRoute: () => LibrariesLibraryIdRoute,
-  } as any)
-const LibrariesLibraryIdSettingsRoute =
-  LibrariesLibraryIdSettingsRouteImport.update({
-    id: '/settings',
-    path: '/settings',
-    getParentRoute: () => LibrariesLibraryIdRoute,
+const AuthenticatedLibrariesIndexRoute =
+  AuthenticatedLibrariesIndexRouteImport.update({
+    id: '/libraries/',
+    path: '/libraries/',
+    getParentRoute: () => AuthenticatedRoute,
   } as any).lazy(() =>
-    import('./routes/libraries.$libraryId.settings.lazy').then((d) => d.Route),
+    import('./routes/_authenticated.libraries.index.lazy').then((d) => d.Route),
   )
-const LibrariesLibraryIdVideosIndexRoute =
-  LibrariesLibraryIdVideosIndexRouteImport.update({
-    id: '/',
-    path: '/',
-    getParentRoute: () => LibrariesLibraryIdVideosRoute,
+const AuthenticatedLibrariesLibraryIdRoute =
+  AuthenticatedLibrariesLibraryIdRouteImport.update({
+    id: '/libraries/$libraryId',
+    path: '/libraries/$libraryId',
+    getParentRoute: () => AuthenticatedRoute,
   } as any).lazy(() =>
-    import('./routes/libraries.$libraryId.videos.index.lazy').then(
+    import('./routes/_authenticated.libraries.$libraryId.lazy').then(
       (d) => d.Route,
     ),
   )
-const LibrariesLibraryIdVideosVideoIdRoute =
-  LibrariesLibraryIdVideosVideoIdRouteImport.update({
+const AuthenticatedLibrariesLibraryIdIndexRoute =
+  AuthenticatedLibrariesLibraryIdIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedLibrariesLibraryIdRoute,
+  } as any).lazy(() =>
+    import('./routes/_authenticated.libraries.$libraryId.index.lazy').then(
+      (d) => d.Route,
+    ),
+  )
+const AuthenticatedLibrariesLibraryIdVideosRoute =
+  AuthenticatedLibrariesLibraryIdVideosRouteImport.update({
+    id: '/videos',
+    path: '/videos',
+    getParentRoute: () => AuthenticatedLibrariesLibraryIdRoute,
+  } as any)
+const AuthenticatedLibrariesLibraryIdSettingsRoute =
+  AuthenticatedLibrariesLibraryIdSettingsRouteImport.update({
+    id: '/settings',
+    path: '/settings',
+    getParentRoute: () => AuthenticatedLibrariesLibraryIdRoute,
+  } as any).lazy(() =>
+    import('./routes/_authenticated.libraries.$libraryId.settings.lazy').then(
+      (d) => d.Route,
+    ),
+  )
+const AuthenticatedLibrariesLibraryIdVideosIndexRoute =
+  AuthenticatedLibrariesLibraryIdVideosIndexRouteImport.update({
+    id: '/',
+    path: '/',
+    getParentRoute: () => AuthenticatedLibrariesLibraryIdVideosRoute,
+  } as any).lazy(() =>
+    import('./routes/_authenticated.libraries.$libraryId.videos.index.lazy').then(
+      (d) => d.Route,
+    ),
+  )
+const AuthenticatedLibrariesLibraryIdVideosVideoIdRoute =
+  AuthenticatedLibrariesLibraryIdVideosVideoIdRouteImport.update({
     id: '/$videoId',
     path: '/$videoId',
-    getParentRoute: () => LibrariesLibraryIdVideosRoute,
+    getParentRoute: () => AuthenticatedLibrariesLibraryIdVideosRoute,
   } as any).lazy(() =>
-    import('./routes/libraries.$libraryId.videos.$videoId.lazy').then(
+    import('./routes/_authenticated.libraries.$libraryId.videos.$videoId.lazy').then(
       (d) => d.Route,
     ),
   )
@@ -88,34 +102,35 @@ const LibrariesLibraryIdVideosVideoIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/libraries/$libraryId': typeof LibrariesLibraryIdRouteWithChildren
-  '/libraries/': typeof LibrariesIndexRoute
-  '/libraries/$libraryId/settings': typeof LibrariesLibraryIdSettingsRoute
-  '/libraries/$libraryId/videos': typeof LibrariesLibraryIdVideosRouteWithChildren
-  '/libraries/$libraryId/': typeof LibrariesLibraryIdIndexRoute
-  '/libraries/$libraryId/videos/$videoId': typeof LibrariesLibraryIdVideosVideoIdRoute
-  '/libraries/$libraryId/videos/': typeof LibrariesLibraryIdVideosIndexRoute
+  '/libraries/$libraryId': typeof AuthenticatedLibrariesLibraryIdRouteWithChildren
+  '/libraries/': typeof AuthenticatedLibrariesIndexRoute
+  '/libraries/$libraryId/settings': typeof AuthenticatedLibrariesLibraryIdSettingsRoute
+  '/libraries/$libraryId/videos': typeof AuthenticatedLibrariesLibraryIdVideosRouteWithChildren
+  '/libraries/$libraryId/': typeof AuthenticatedLibrariesLibraryIdIndexRoute
+  '/libraries/$libraryId/videos/$videoId': typeof AuthenticatedLibrariesLibraryIdVideosVideoIdRoute
+  '/libraries/$libraryId/videos/': typeof AuthenticatedLibrariesLibraryIdVideosIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
-  '/libraries': typeof LibrariesIndexRoute
-  '/libraries/$libraryId/settings': typeof LibrariesLibraryIdSettingsRoute
-  '/libraries/$libraryId': typeof LibrariesLibraryIdIndexRoute
-  '/libraries/$libraryId/videos/$videoId': typeof LibrariesLibraryIdVideosVideoIdRoute
-  '/libraries/$libraryId/videos': typeof LibrariesLibraryIdVideosIndexRoute
+  '/libraries': typeof AuthenticatedLibrariesIndexRoute
+  '/libraries/$libraryId/settings': typeof AuthenticatedLibrariesLibraryIdSettingsRoute
+  '/libraries/$libraryId': typeof AuthenticatedLibrariesLibraryIdIndexRoute
+  '/libraries/$libraryId/videos/$videoId': typeof AuthenticatedLibrariesLibraryIdVideosVideoIdRoute
+  '/libraries/$libraryId/videos': typeof AuthenticatedLibrariesLibraryIdVideosIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/_authenticated': typeof AuthenticatedRouteWithChildren
   '/login': typeof LoginRoute
-  '/libraries/$libraryId': typeof LibrariesLibraryIdRouteWithChildren
-  '/libraries/': typeof LibrariesIndexRoute
-  '/libraries/$libraryId/settings': typeof LibrariesLibraryIdSettingsRoute
-  '/libraries/$libraryId/videos': typeof LibrariesLibraryIdVideosRouteWithChildren
-  '/libraries/$libraryId/': typeof LibrariesLibraryIdIndexRoute
-  '/libraries/$libraryId/videos/$videoId': typeof LibrariesLibraryIdVideosVideoIdRoute
-  '/libraries/$libraryId/videos/': typeof LibrariesLibraryIdVideosIndexRoute
+  '/_authenticated/libraries/$libraryId': typeof AuthenticatedLibrariesLibraryIdRouteWithChildren
+  '/_authenticated/libraries/': typeof AuthenticatedLibrariesIndexRoute
+  '/_authenticated/libraries/$libraryId/settings': typeof AuthenticatedLibrariesLibraryIdSettingsRoute
+  '/_authenticated/libraries/$libraryId/videos': typeof AuthenticatedLibrariesLibraryIdVideosRouteWithChildren
+  '/_authenticated/libraries/$libraryId/': typeof AuthenticatedLibrariesLibraryIdIndexRoute
+  '/_authenticated/libraries/$libraryId/videos/$videoId': typeof AuthenticatedLibrariesLibraryIdVideosVideoIdRoute
+  '/_authenticated/libraries/$libraryId/videos/': typeof AuthenticatedLibrariesLibraryIdVideosIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -141,21 +156,21 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/_authenticated'
     | '/login'
-    | '/libraries/$libraryId'
-    | '/libraries/'
-    | '/libraries/$libraryId/settings'
-    | '/libraries/$libraryId/videos'
-    | '/libraries/$libraryId/'
-    | '/libraries/$libraryId/videos/$videoId'
-    | '/libraries/$libraryId/videos/'
+    | '/_authenticated/libraries/$libraryId'
+    | '/_authenticated/libraries/'
+    | '/_authenticated/libraries/$libraryId/settings'
+    | '/_authenticated/libraries/$libraryId/videos'
+    | '/_authenticated/libraries/$libraryId/'
+    | '/_authenticated/libraries/$libraryId/videos/$videoId'
+    | '/_authenticated/libraries/$libraryId/videos/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
   LoginRoute: typeof LoginRoute
-  LibrariesLibraryIdRoute: typeof LibrariesLibraryIdRouteWithChildren
-  LibrariesIndexRoute: typeof LibrariesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -167,6 +182,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -174,94 +196,116 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/libraries/': {
-      id: '/libraries/'
+    '/_authenticated/libraries/': {
+      id: '/_authenticated/libraries/'
       path: '/libraries'
       fullPath: '/libraries/'
-      preLoaderRoute: typeof LibrariesIndexRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedLibrariesIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
-    '/libraries/$libraryId': {
-      id: '/libraries/$libraryId'
+    '/_authenticated/libraries/$libraryId': {
+      id: '/_authenticated/libraries/$libraryId'
       path: '/libraries/$libraryId'
       fullPath: '/libraries/$libraryId'
-      preLoaderRoute: typeof LibrariesLibraryIdRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedLibrariesLibraryIdRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
-    '/libraries/$libraryId/': {
-      id: '/libraries/$libraryId/'
+    '/_authenticated/libraries/$libraryId/': {
+      id: '/_authenticated/libraries/$libraryId/'
       path: '/'
       fullPath: '/libraries/$libraryId/'
-      preLoaderRoute: typeof LibrariesLibraryIdIndexRouteImport
-      parentRoute: typeof LibrariesLibraryIdRoute
+      preLoaderRoute: typeof AuthenticatedLibrariesLibraryIdIndexRouteImport
+      parentRoute: typeof AuthenticatedLibrariesLibraryIdRoute
     }
-    '/libraries/$libraryId/videos': {
-      id: '/libraries/$libraryId/videos'
+    '/_authenticated/libraries/$libraryId/videos': {
+      id: '/_authenticated/libraries/$libraryId/videos'
       path: '/videos'
       fullPath: '/libraries/$libraryId/videos'
-      preLoaderRoute: typeof LibrariesLibraryIdVideosRouteImport
-      parentRoute: typeof LibrariesLibraryIdRoute
+      preLoaderRoute: typeof AuthenticatedLibrariesLibraryIdVideosRouteImport
+      parentRoute: typeof AuthenticatedLibrariesLibraryIdRoute
     }
-    '/libraries/$libraryId/settings': {
-      id: '/libraries/$libraryId/settings'
+    '/_authenticated/libraries/$libraryId/settings': {
+      id: '/_authenticated/libraries/$libraryId/settings'
       path: '/settings'
       fullPath: '/libraries/$libraryId/settings'
-      preLoaderRoute: typeof LibrariesLibraryIdSettingsRouteImport
-      parentRoute: typeof LibrariesLibraryIdRoute
+      preLoaderRoute: typeof AuthenticatedLibrariesLibraryIdSettingsRouteImport
+      parentRoute: typeof AuthenticatedLibrariesLibraryIdRoute
     }
-    '/libraries/$libraryId/videos/': {
-      id: '/libraries/$libraryId/videos/'
+    '/_authenticated/libraries/$libraryId/videos/': {
+      id: '/_authenticated/libraries/$libraryId/videos/'
       path: '/'
       fullPath: '/libraries/$libraryId/videos/'
-      preLoaderRoute: typeof LibrariesLibraryIdVideosIndexRouteImport
-      parentRoute: typeof LibrariesLibraryIdVideosRoute
+      preLoaderRoute: typeof AuthenticatedLibrariesLibraryIdVideosIndexRouteImport
+      parentRoute: typeof AuthenticatedLibrariesLibraryIdVideosRoute
     }
-    '/libraries/$libraryId/videos/$videoId': {
-      id: '/libraries/$libraryId/videos/$videoId'
+    '/_authenticated/libraries/$libraryId/videos/$videoId': {
+      id: '/_authenticated/libraries/$libraryId/videos/$videoId'
       path: '/$videoId'
       fullPath: '/libraries/$libraryId/videos/$videoId'
-      preLoaderRoute: typeof LibrariesLibraryIdVideosVideoIdRouteImport
-      parentRoute: typeof LibrariesLibraryIdVideosRoute
+      preLoaderRoute: typeof AuthenticatedLibrariesLibraryIdVideosVideoIdRouteImport
+      parentRoute: typeof AuthenticatedLibrariesLibraryIdVideosRoute
     }
   }
 }
 
-interface LibrariesLibraryIdVideosRouteChildren {
-  LibrariesLibraryIdVideosVideoIdRoute: typeof LibrariesLibraryIdVideosVideoIdRoute
-  LibrariesLibraryIdVideosIndexRoute: typeof LibrariesLibraryIdVideosIndexRoute
+interface AuthenticatedLibrariesLibraryIdVideosRouteChildren {
+  AuthenticatedLibrariesLibraryIdVideosVideoIdRoute: typeof AuthenticatedLibrariesLibraryIdVideosVideoIdRoute
+  AuthenticatedLibrariesLibraryIdVideosIndexRoute: typeof AuthenticatedLibrariesLibraryIdVideosIndexRoute
 }
 
-const LibrariesLibraryIdVideosRouteChildren: LibrariesLibraryIdVideosRouteChildren =
+const AuthenticatedLibrariesLibraryIdVideosRouteChildren: AuthenticatedLibrariesLibraryIdVideosRouteChildren =
   {
-    LibrariesLibraryIdVideosVideoIdRoute: LibrariesLibraryIdVideosVideoIdRoute,
-    LibrariesLibraryIdVideosIndexRoute: LibrariesLibraryIdVideosIndexRoute,
+    AuthenticatedLibrariesLibraryIdVideosVideoIdRoute:
+      AuthenticatedLibrariesLibraryIdVideosVideoIdRoute,
+    AuthenticatedLibrariesLibraryIdVideosIndexRoute:
+      AuthenticatedLibrariesLibraryIdVideosIndexRoute,
   }
 
-const LibrariesLibraryIdVideosRouteWithChildren =
-  LibrariesLibraryIdVideosRoute._addFileChildren(
-    LibrariesLibraryIdVideosRouteChildren,
+const AuthenticatedLibrariesLibraryIdVideosRouteWithChildren =
+  AuthenticatedLibrariesLibraryIdVideosRoute._addFileChildren(
+    AuthenticatedLibrariesLibraryIdVideosRouteChildren,
   )
 
-interface LibrariesLibraryIdRouteChildren {
-  LibrariesLibraryIdSettingsRoute: typeof LibrariesLibraryIdSettingsRoute
-  LibrariesLibraryIdVideosRoute: typeof LibrariesLibraryIdVideosRouteWithChildren
-  LibrariesLibraryIdIndexRoute: typeof LibrariesLibraryIdIndexRoute
+interface AuthenticatedLibrariesLibraryIdRouteChildren {
+  AuthenticatedLibrariesLibraryIdSettingsRoute: typeof AuthenticatedLibrariesLibraryIdSettingsRoute
+  AuthenticatedLibrariesLibraryIdVideosRoute: typeof AuthenticatedLibrariesLibraryIdVideosRouteWithChildren
+  AuthenticatedLibrariesLibraryIdIndexRoute: typeof AuthenticatedLibrariesLibraryIdIndexRoute
 }
 
-const LibrariesLibraryIdRouteChildren: LibrariesLibraryIdRouteChildren = {
-  LibrariesLibraryIdSettingsRoute: LibrariesLibraryIdSettingsRoute,
-  LibrariesLibraryIdVideosRoute: LibrariesLibraryIdVideosRouteWithChildren,
-  LibrariesLibraryIdIndexRoute: LibrariesLibraryIdIndexRoute,
+const AuthenticatedLibrariesLibraryIdRouteChildren: AuthenticatedLibrariesLibraryIdRouteChildren =
+  {
+    AuthenticatedLibrariesLibraryIdSettingsRoute:
+      AuthenticatedLibrariesLibraryIdSettingsRoute,
+    AuthenticatedLibrariesLibraryIdVideosRoute:
+      AuthenticatedLibrariesLibraryIdVideosRouteWithChildren,
+    AuthenticatedLibrariesLibraryIdIndexRoute:
+      AuthenticatedLibrariesLibraryIdIndexRoute,
+  }
+
+const AuthenticatedLibrariesLibraryIdRouteWithChildren =
+  AuthenticatedLibrariesLibraryIdRoute._addFileChildren(
+    AuthenticatedLibrariesLibraryIdRouteChildren,
+  )
+
+interface AuthenticatedRouteChildren {
+  AuthenticatedLibrariesLibraryIdRoute: typeof AuthenticatedLibrariesLibraryIdRouteWithChildren
+  AuthenticatedLibrariesIndexRoute: typeof AuthenticatedLibrariesIndexRoute
 }
 
-const LibrariesLibraryIdRouteWithChildren =
-  LibrariesLibraryIdRoute._addFileChildren(LibrariesLibraryIdRouteChildren)
+const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
+  AuthenticatedLibrariesLibraryIdRoute:
+    AuthenticatedLibrariesLibraryIdRouteWithChildren,
+  AuthenticatedLibrariesIndexRoute: AuthenticatedLibrariesIndexRoute,
+}
+
+const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
+  AuthenticatedRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AuthenticatedRoute: AuthenticatedRouteWithChildren,
   LoginRoute: LoginRoute,
-  LibrariesLibraryIdRoute: LibrariesLibraryIdRouteWithChildren,
-  LibrariesIndexRoute: LibrariesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

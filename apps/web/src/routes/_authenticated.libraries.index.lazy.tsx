@@ -12,7 +12,7 @@ import { CreateLibraryDialog } from "@/components/create-library-dialog";
 import { LibraryCard } from "@/components/library-card";
 import { trpc } from "@/utils/trpc";
 
-export const Route = createLazyFileRoute("/libraries/")({
+export const Route = createLazyFileRoute("/_authenticated/libraries/")({
 	component: LibrariesPage,
 });
 

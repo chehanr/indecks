@@ -25,7 +25,9 @@ import { VideoRow } from "@/components/video-row";
 import { useJobTracking, useLibrary } from "@/hooks/use-library";
 import { queryClient, trpc, trpcClient } from "@/utils/trpc";
 
-export const Route = createLazyFileRoute("/libraries/$libraryId/videos/")({
+export const Route = createLazyFileRoute(
+	"/_authenticated/libraries/$libraryId/videos/"
+)({
 	component: VideosPage,
 });
 

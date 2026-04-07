@@ -23,7 +23,9 @@ import { ResultCard } from "@/components/result-card";
 import { useLibrary } from "@/hooks/use-library";
 import { trpc } from "@/utils/trpc";
 
-export const Route = createLazyFileRoute("/libraries/$libraryId/")({
+export const Route = createLazyFileRoute(
+	"/_authenticated/libraries/$libraryId/"
+)({
 	component: SearchPage,
 });
 

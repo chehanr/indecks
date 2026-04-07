@@ -1,17 +1,3 @@
-import { Separator } from "@indecks/ui/components/separator";
-import {
-	Sidebar,
-	SidebarContent,
-	SidebarFooter,
-	SidebarGroup,
-	SidebarGroupContent,
-	SidebarInset,
-	SidebarMenu,
-	SidebarMenuButton,
-	SidebarMenuItem,
-	SidebarProvider,
-	SidebarTrigger,
-} from "@indecks/ui/components/sidebar";
 import { Toaster } from "@indecks/ui/components/sonner";
 import { TooltipProvider } from "@indecks/ui/components/tooltip";
 import type { QueryClient } from "@tanstack/react-query";
@@ -19,16 +5,12 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import {
 	createRootRouteWithContext,
 	HeadContent,
-	Link,
 	Outlet,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
-import { Library } from "lucide-react";
 import { NuqsAdapter } from "nuqs/adapters/tanstack-router";
 
 import { BreadcrumbSlotProvider } from "@/components/breadcrumb-slot";
-import { ModeToggle } from "@/components/mode-toggle";
-import { SidebarUser } from "@/components/sidebar-user";
 import { ThemeProvider } from "@/components/theme-provider";
 import type { trpc } from "@/utils/trpc";
 
@@ -60,33 +42,6 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
 	}),
 });
 
-function AppSidebar() {
-	return (
-		<Sidebar>
-			<SidebarContent>
-				<SidebarGroup>
-					<SidebarGroupContent>
-						<SidebarMenu>
-							<SidebarMenuItem>
-								<SidebarMenuButton
-									render={<Link to="/libraries" />}
-									tooltip="Libraries"
-								>
-									<Library />
-									<span>Libraries</span>
-								</SidebarMenuButton>
-							</SidebarMenuItem>
-						</SidebarMenu>
-					</SidebarGroupContent>
-				</SidebarGroup>
-			</SidebarContent>
-			<SidebarFooter>
-				<SidebarUser />
-			</SidebarFooter>
-		</Sidebar>
-	);
-}
-
 function RootComponent() {
 	return (
 		<>
@@ -100,31 +55,7 @@ function RootComponent() {
 				<NuqsAdapter>
 					<TooltipProvider>
 						<BreadcrumbSlotProvider>
-							{(breadcrumb) => (
-								<SidebarProvider
-									defaultOpen={
-										document.cookie
-											.split("; ")
-											.find((c) => c.startsWith("sidebar_state="))
-											?.split("=")[1] !== "false"
-									}
-								>
-									<AppSidebar />
-									<SidebarInset>
-										<header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
-											<SidebarTrigger className="-ml-1" />
-											<Separator className="mr-2 h-4" orientation="vertical" />
-											{breadcrumb}
-											<div className="ml-auto flex items-center gap-2">
-												<ModeToggle />
-											</div>
-										</header>
-										<div className="flex-1 p-4">
-											<Outlet />
-										</div>
-									</SidebarInset>
-								</SidebarProvider>
-							)}
+							<Outlet />
 						</BreadcrumbSlotProvider>
 					</TooltipProvider>
 					<Toaster richColors />

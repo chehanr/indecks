@@ -15,7 +15,7 @@ import { useLibrary } from "@/hooks/use-library";
 import { trpc } from "@/utils/trpc";
 
 export const Route = createLazyFileRoute(
-	"/libraries/$libraryId/videos/$videoId"
+	"/_authenticated/libraries/$libraryId/videos/$videoId"
 )({
 	component: VideoDetailPage,
 });

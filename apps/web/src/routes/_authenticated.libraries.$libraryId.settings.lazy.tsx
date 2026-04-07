@@ -30,7 +30,9 @@ import { AddIndexerDialog, IndexerCard } from "@/components/indexer-card";
 import { useJobTracking, useLibrary } from "@/hooks/use-library";
 import { trpc, trpcClient } from "@/utils/trpc";
 
-export const Route = createLazyFileRoute("/libraries/$libraryId/settings")({
+export const Route = createLazyFileRoute(
+	"/_authenticated/libraries/$libraryId/settings"
+)({
 	component: SettingsPage,
 });
 
