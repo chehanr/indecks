@@ -1,8 +1,5 @@
-import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, renameSync } from "node:fs";
-import { stat } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import { trpcServer } from "@hono/trpc-server";
 import { createTrpcContext, makeAppLayer } from "@indecks/api/context";
@@ -11,7 +8,6 @@ import { appRouter } from "@indecks/api/routers/index";
 import { AuthService } from "@indecks/auth";
 import { DbService } from "@indecks/db";
 import { indexer as indexerTable } from "@indecks/db/schema/indexer";
-import { library as libraryTable } from "@indecks/db/schema/library";
 import { env } from "@indecks/env/server";
 import {
 	JobQueueService,
@@ -23,9 +19,9 @@ import { Effect, Fiber, ManagedRuntime, Schedule } from "effect";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import { createMediaHandlers } from "./media";
+import { createPathValidator } from "./path-validation";
 import { ThumbnailCacheServiceLive } from "./thumbnail-cache";
-
-const RANGE_PATTERN = /bytes=(\d+)-(\d*)/;
 
 const vectorDir = resolve(env.VECTOR_DIR);
 const thumbnailDir = resolve(env.THUMBNAILS_DIR);
@@ -129,6 +125,23 @@ const workerFiber = appRuntime.runFork(
 );
 
 const auth = await appRuntime.runPromise(AuthService);
+const validateFilePath = createPathValidator(appRuntime);
+
+const corsHeaders: Record<string, string> = {
+	"Access-Control-Allow-Origin": env.CORS_ORIGIN,
+	"Access-Control-Allow-Credentials": "true",
+	"Access-Control-Expose-Headers":
+		"Content-Range, Accept-Ranges, Content-Length",
+};
+
+const media = createMediaHandlers({
+	auth,
+	corsHeaders,
+	thumbnailDir,
+	validateFilePath,
+});
+
+// --- Hono app (tRPC, auth, static files) ---
 
 const app = new Hono();
 
@@ -161,243 +174,6 @@ app.use(
 	})
 );
 
-// --- Shared path validation with cache ---
-
-let allowedPathsCache: string[] = [];
-let allowedPathsCacheTime = 0;
-const ALLOWED_PATHS_TTL = 30_000; // 30 seconds
-
-async function getAllowedPaths(): Promise<string[]> {
-	const now = Date.now();
-	if (now - allowedPathsCacheTime < ALLOWED_PATHS_TTL) {
-		return allowedPathsCache;
-	}
-
-	const libraries = await appRuntime.runPromise(
-		Effect.gen(function* () {
-			const db = yield* DbService;
-			return yield* Effect.promise(() => db.select().from(libraryTable).all());
-		})
-	);
-
-	allowedPathsCache = libraries.flatMap((lib) => {
-		const folderPaths: string[] = JSON.parse(lib.folderPaths);
-		return folderPaths.map((fp) => resolve(fp));
-	});
-	allowedPathsCacheTime = now;
-	return allowedPathsCache;
-}
-
-async function validateFilePath(
-	filePath: string
-): Promise<{ absPath: string } | { error: string; status: 403 }> {
-	const absPath = resolve(filePath);
-	const allowed = await getAllowedPaths();
-
-	if (!allowed.some((fp) => absPath.startsWith(fp))) {
-		return { error: "Access denied", status: 403 };
-	}
-
-	return { absPath };
-}
-
-// --- Thumbnail generation with concurrency limit ---
-
-const MAX_CONCURRENT_THUMBNAILS = 3;
-let activeThumbCount = 0;
-const thumbQueue: Array<() => void> = [];
-const thumbLocks = new Map<string, Promise<number | null>>();
-
-function acquireThumbSlot(): Promise<void> {
-	if (activeThumbCount < MAX_CONCURRENT_THUMBNAILS) {
-		activeThumbCount++;
-		return Promise.resolve();
-	}
-	return new Promise<void>((resolve) => {
-		thumbQueue.push(resolve);
-	});
-}
-
-function releaseThumbSlot(): void {
-	const next = thumbQueue.shift();
-	if (next) {
-		next();
-	} else {
-		activeThumbCount--;
-	}
-}
-
-function generateThumbnail(
-	absPath: string,
-	thumbPath: string,
-	seconds: number
-): Promise<number | null> {
-	const existing = thumbLocks.get(thumbPath);
-	if (existing) {
-		return existing;
-	}
-
-	const promise = acquireThumbSlot()
-		.then(
-			() =>
-				new Promise<number | null>((res) => {
-					const proc = spawn("ffmpeg", [
-						"-nostdin",
-						"-ss",
-						String(seconds),
-						"-i",
-						absPath,
-						"-frames:v",
-						"1",
-						"-vf",
-						"scale=320:-2",
-						"-q:v",
-						"6",
-						"-y",
-						thumbPath,
-					]);
-					proc.stdout.resume();
-					proc.stderr.resume();
-					proc.on("close", res);
-				})
-		)
-		.finally(() => {
-			releaseThumbSlot();
-			thumbLocks.delete(thumbPath);
-		});
-
-	thumbLocks.set(thumbPath, promise);
-	return promise;
-}
-
-// --- Video endpoint ---
-
-app.get("/api/video", async (c) => {
-	const filePath = c.req.query("path");
-	if (!filePath) {
-		return c.text("Missing path parameter", 400);
-	}
-
-	const result = await validateFilePath(filePath);
-	if ("error" in result) {
-		return c.text(result.error, result.status);
-	}
-
-	const fileStat = await stat(result.absPath).catch(() => null);
-	if (!fileStat) {
-		return c.text("File not found", 404);
-	}
-
-	const fileSize = fileStat.size;
-	const file = Bun.file(result.absPath);
-	const contentType = file.type || "application/octet-stream";
-	const fileName = basename(result.absPath);
-	const etag = `"${fileStat.mtimeMs.toString(36)}-${fileSize.toString(36)}"`;
-	const disposition = `inline; filename="${encodeURIComponent(fileName)}"`;
-
-	if (c.req.header("If-None-Match") === etag) {
-		return new Response(null, { status: 304 });
-	}
-
-	const DEFAULT_CHUNK = 5 * 1024 * 1024; // 5 MB
-	const range = c.req.header("Range");
-	const rangeMatch = range?.match(RANGE_PATTERN);
-
-	if (rangeMatch) {
-		const start = Number.parseInt(rangeMatch[1] ?? "0", 10);
-		const end = rangeMatch[2]
-			? Number.parseInt(rangeMatch[2], 10)
-			: fileSize - 1;
-		const chunkSize = end - start + 1;
-
-		return new Response(file.slice(start, end + 1).stream(), {
-			status: 206,
-			headers: {
-				"Content-Range": `bytes ${start}-${end}/${fileSize}`,
-				"Accept-Ranges": "bytes",
-				"Content-Length": String(chunkSize),
-				"Content-Type": contentType,
-				"Content-Disposition": disposition,
-				"Cache-Control": "public, max-age=86400",
-				ETag: etag,
-			},
-		});
-	}
-
-	// No Range header — return a capped initial chunk to avoid buffering the entire file
-	const end = Math.min(DEFAULT_CHUNK - 1, fileSize - 1);
-
-	return new Response(file.slice(0, end + 1).stream(), {
-		status: 206,
-		headers: {
-			"Content-Range": `bytes 0-${end}/${fileSize}`,
-			"Accept-Ranges": "bytes",
-			"Content-Length": String(end + 1),
-			"Content-Type": contentType,
-			"Content-Disposition": disposition,
-			"Cache-Control": "public, max-age=86400",
-			ETag: etag,
-		},
-	});
-});
-
-// --- Thumbnail endpoint ---
-
-app.get("/api/thumbnail", async (c) => {
-	const filePath = c.req.query("path");
-	const time = c.req.query("time");
-	if (!filePath || time === undefined) {
-		return c.text("Missing path or time parameter", 400);
-	}
-
-	const seconds = Number.parseFloat(time);
-	if (Number.isNaN(seconds) || seconds < 0) {
-		return c.text("Invalid time parameter", 400);
-	}
-
-	const result = await validateFilePath(filePath);
-	if ("error" in result) {
-		return c.text(result.error, result.status);
-	}
-
-	const pathHash = createHash("sha256")
-		.update(result.absPath)
-		.digest("hex")
-		.slice(0, 16);
-	const thumbPath = resolve(thumbnailDir, `${pathHash}_${seconds}.jpg`);
-
-	const thumbExists = await stat(thumbPath)
-		.then(() => true)
-		.catch(() => false);
-
-	if (!thumbExists) {
-		const exitCode = await generateThumbnail(
-			result.absPath,
-			thumbPath,
-			seconds
-		);
-		if (exitCode !== 0) {
-			return c.text("Thumbnail generation failed", 500);
-		}
-	}
-
-	const thumbStat = await stat(thumbPath);
-	const thumbEtag = `"thumb-${thumbStat.mtimeMs.toString(36)}"`;
-
-	if (c.req.header("If-None-Match") === thumbEtag) {
-		return new Response(null, { status: 304 });
-	}
-
-	const file = Bun.file(thumbPath);
-	return new Response(file.stream(), {
-		headers: {
-			"Content-Type": "image/jpeg",
-			"Cache-Control": "public, max-age=604800, immutable",
-			ETag: thumbEtag,
-		},
-	});
-});
-
 app.get("/healthz", (c) => c.text("OK"));
 
 if (env.NODE_ENV === "production") {
@@ -419,8 +195,21 @@ const shutdown = async () => {
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
+// Media endpoints bypass Hono for native Bun file serving
 export default {
-	fetch: app.fetch,
+	fetch(req: Request) {
+		const url = new URL(req.url);
+		if (url.pathname === "/api/video" || url.pathname === "/api/thumbnail") {
+			if (req.method === "OPTIONS") {
+				return media.handlePreflight();
+			}
+			if (url.pathname === "/api/video") {
+				return media.handleVideo(req);
+			}
+			return media.handleThumbnail(req);
+		}
+		return app.fetch(req);
+	},
 	port: 3000,
 	idleTimeout: 120,
 };
