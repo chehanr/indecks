@@ -86,6 +86,11 @@ docker run -p 3000:3000 \
   ghcr.io/chehanr/indecks:latest
 ```
 
+### Health Checks
+
+- `/livez` — Liveness probe (process alive)
+- `/readyz` — Readiness probe (DB connection OK)
+
 ## Data Directory
 
 All runtime data lives under a `data/` directory (gitignored):

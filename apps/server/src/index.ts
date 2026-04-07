@@ -174,7 +174,23 @@ app.use(
 	})
 );
 
-app.get("/healthz", (c) => c.text("OK"));
+// Liveness: is the process alive and not deadlocked?
+app.get("/livez", (c) => c.text("OK"));
+
+// Readiness: can the server handle requests? (checks DB connection)
+app.get("/readyz", async (c) => {
+	try {
+		await appRuntime.runPromise(
+			Effect.gen(function* () {
+				const db = yield* DbService;
+				yield* Effect.promise(() => db.run("SELECT 1"));
+			})
+		);
+		return c.text("OK");
+	} catch {
+		return c.text("Service Unavailable", 503);
+	}
+});
 
 if (env.NODE_ENV === "production") {
 	const { serveStatic } = await import("hono/bun");
