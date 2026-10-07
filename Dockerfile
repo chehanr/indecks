@@ -40,8 +40,8 @@ RUN bun install --frozen-lockfile --production
 # --- Production ---
 FROM base AS production
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg=7:7.1.3-0+deb13u1 \
-    libsqlite3-0=3.46.1-7 \
+    ffmpeg=7:7.1.3-* \
+    libsqlite3-0=3.46.1-* \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
