@@ -53,7 +53,7 @@ bun run dev
 
 ## Embedding API
 
-indecks uses an external, OpenAI-compatible embedding API to index video content. Each library can have one or more **indexers**, each pointing at a different provider or model.
+indecks uses an external, OpenAI-compatible embedding API to index video content. Each library can have one or more **indexers**, each pointing at a different provider or model — so multiple models can index the same library side by side and be compared from the search UI's indexer picker.
 
 An indexer requires:
 
@@ -64,7 +64,10 @@ An indexer requires:
 | `model` | Model identifier (e.g., `Qwen/Qwen3-VL-Embedding-2B`) |
 | `dimensions` | Expected embedding vector size (e.g., `2048`) |
 
-Any provider that serves an OpenAI-compatible embeddings endpoint works. Tested with [Qwen3-VL-Embedding-2B](https://huggingface.co/Qwen/Qwen3-VL-Embedding-2B) models served via [vLLM](https://docs.vllm.ai).
+Any provider that serves an OpenAI-compatible embeddings endpoint works. Tested with:
+
+- [Qwen3-VL-Embedding-2B](https://huggingface.co/Qwen/Qwen3-VL-Embedding-2B) via [vLLM](https://docs.vllm.ai) — chunks embedded as `video_url` parts
+- [EmbeddingGemma 2](https://huggingface.co/google/embeddinggemma-2) via vLLM — models whose identifiers start with `google/embeddinggemma` are embedded as fps-sampled JPEG `image_url` frame lists instead (the vLLM `video_url` chat path is broken for them as of the Oct 2026 nightly)
 
 ## Docker
 

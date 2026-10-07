@@ -28,6 +28,11 @@ const DEFAULT_VIDEO_INSTRUCTION = "Represent the visual content.";
 const DEFAULT_TEXT_INSTRUCTION = "Represent the user's input.";
 
 export interface EmbedServiceShape {
+	readonly embedFrames: (
+		frames: Buffer[],
+		config: EmbedConfig,
+		instruction?: string
+	) => Effect.Effect<number[], EmbeddingApiError | EmbeddingEmptyResponseError>;
 	readonly embedText: (
 		text: string,
 		config: EmbedConfig,
@@ -145,6 +150,42 @@ export const EmbedServiceLive = Layer.effect(
 										video_url: { url: `data:video/mp4;base64,${base64}` },
 									},
 								],
+							},
+						],
+						encoding_format: "float",
+					});
+
+					const [first] = result.data;
+					if (!first) {
+						return yield* new EmbeddingEmptyResponseError();
+					}
+					return first.embedding;
+				}),
+
+			embedFrames: (frames, config, instruction) =>
+				Effect.gen(function* () {
+					const url = `${config.baseUrl.replace(TRAILING_SLASH, "")}/embeddings`;
+
+					const result = yield* callEmbeddingApi(client, url, config.apiKey, {
+						model: config.model,
+						messages: [
+							{
+								role: "system",
+								content: [
+									{
+										type: "text",
+										text: instruction ?? DEFAULT_VIDEO_INSTRUCTION,
+									},
+								],
+							},
+							{
+								role: "user",
+								content: frames.map((frame) => ({
+									type: "image_url",
+									image_url: {
+										url: `data:image/jpeg;base64,${frame.toString("base64")}`,
+									},
+								})),
 							},
 						],
 						encoding_format: "float",

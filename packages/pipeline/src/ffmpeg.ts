@@ -178,6 +178,10 @@ export interface FFmpegServiceShape {
 		chunkPath: string,
 		options?: DownscaleOptions
 	) => Effect.Effect<string, FFmpegError>;
+	readonly extractChunkFrames: (
+		chunkPath: string,
+		fps: number
+	) => Effect.Effect<Buffer[], FFmpegError>;
 	readonly getVideoDuration: (
 		filePath: string
 	) => Effect.Effect<number, FFmpegError>;
@@ -408,6 +412,67 @@ export const FFmpegServiceLive = Layer.effect(
 					]);
 
 					return outPath;
+				}),
+
+			extractChunkFrames: (chunkPath, fps) =>
+				Effect.gen(function* () {
+					const framesDir = join(
+						tmpdir(),
+						`indecks_frames_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+					);
+					yield* fs.makeDirectory(framesDir, { recursive: true }).pipe(
+						Effect.mapError(
+							(e) =>
+								new FFmpegError({
+									command: "mkdir frames tmpdir",
+									exitCode: -1,
+									stderr: String(e),
+								})
+						)
+					);
+
+					yield* runExitCode(executor, "ffmpeg", [
+						"-y",
+						"-i",
+						chunkPath,
+						"-vf",
+						`fps=${fps}`,
+						"-q:v",
+						"5",
+						join(framesDir, "frame_%04d.jpg"),
+					]);
+
+					const names = yield* fs.readDirectory(framesDir).pipe(
+						Effect.mapError(
+							(e) =>
+								new FFmpegError({
+									command: "readdir frames",
+									exitCode: -1,
+									stderr: String(e),
+								})
+						)
+					);
+					names.sort();
+
+					const frames: Buffer[] = [];
+					for (const name of names) {
+						const bytes = yield* fs.readFile(join(framesDir, name)).pipe(
+							Effect.mapError(
+								(e) =>
+									new FFmpegError({
+										command: "read frame",
+										exitCode: -1,
+										stderr: String(e),
+									})
+							)
+						);
+						frames.push(Buffer.from(bytes));
+					}
+
+					yield* fs
+						.remove(framesDir, { recursive: true, force: true })
+						.pipe(Effect.ignore);
+					return frames;
 				}),
 
 			scanDirectory: (dirPath, excludePatterns) =>

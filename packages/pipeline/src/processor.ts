@@ -508,19 +508,36 @@ export const ProcessorServiceLive = Layer.effect(
 							chunkInfo.startTime
 						);
 
-						// Read chunk with Bun's zero-copy file I/O and delete immediately
-						const videoBuffer = yield* Effect.promise(() =>
-							Bun.file(chunkInfo.chunkPath)
-								.arrayBuffer()
-								.then((ab) => Buffer.from(ab))
-						);
-						yield* fs.remove(chunkInfo.chunkPath).pipe(Effect.ignore);
-
-						const embedding = yield* embedSvc.embedVideo(
-							videoBuffer,
-							ctx.config,
-							ctx.instruction
-						);
+						let embedding: number[];
+						if (ctx.config.model.startsWith("google/embeddinggemma")) {
+							// The vLLM nightly rejects video_url parts in chat-mode
+							// embeddings for EmbeddingGemma 2 ("unhashable type: dict";
+							// image parts work). EG2 consumes video as fps-sampled
+							// frames natively, so a frame list is the same signal.
+							const frames = yield* ffmpeg.extractChunkFrames(
+								chunkInfo.chunkPath,
+								ctx.downscaleFps
+							);
+							yield* fs.remove(chunkInfo.chunkPath).pipe(Effect.ignore);
+							embedding = yield* embedSvc.embedFrames(
+								frames,
+								ctx.config,
+								ctx.instruction
+							);
+						} else {
+							// Read chunk with Bun's zero-copy file I/O and delete immediately
+							const videoBuffer = yield* Effect.promise(() =>
+								Bun.file(chunkInfo.chunkPath)
+									.arrayBuffer()
+									.then((ab) => Buffer.from(ab))
+							);
+							yield* fs.remove(chunkInfo.chunkPath).pipe(Effect.ignore);
+							embedding = yield* embedSvc.embedVideo(
+								videoBuffer,
+								ctx.config,
+								ctx.instruction
+							);
+						}
 						pendingUpserts.push({
 							chunkId,
 							embedding: new Float32Array(embedding),
